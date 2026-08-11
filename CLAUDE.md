@@ -76,7 +76,7 @@ npm test
 
 경로는 `BOT_DB_PATH` 환경변수로 바꿀 수 있습니다. **테스트는 `require` 전에 이 값을 `':memory:'`로 지정해야 합니다** — 지정하지 않으면 운영 DB를 건드립니다. `db.js`를 직간접적으로 `require`하는 테스트 파일 맨 위에 넣으세요.
 
-새 서버의 기본 음량은 `db.js`의 `DEFAULT_VOLUME`(25)입니다. **DDL의 `DEFAULT`만 고치면 이미 만들어진 DB에는 반영되지 않으므로**(`CREATE TABLE IF NOT EXISTS`는 기존 테이블을 건드리지 않습니다), `getGuildSettings`의 INSERT가 이 값을 직접 넣습니다. 기본값을 바꿀 때는 상수만 고치면 되고, **이미 저장된 서버의 값은 그대로 남습니다** — 필요하면 DB에서 직접 UPDATE해야 합니다.
+새 서버의 기본 음량은 `db.js`의 `DEFAULT_VOLUME`(15)입니다. **DDL의 `DEFAULT`만 고치면 이미 만들어진 DB에는 반영되지 않으므로**(`CREATE TABLE IF NOT EXISTS`는 기존 테이블을 건드리지 않습니다), `getGuildSettings`의 INSERT가 이 값을 직접 넣습니다. 기본값을 바꿀 때는 상수만 고치면 되고, **이미 저장된 서버의 값은 그대로 남습니다** — 필요하면 DB에서 직접 UPDATE해야 합니다.
 
 음량과 반복 모드는 **양쪽에 다 있습니다.** `setVolume`/`setLoopMode`는 메모리와 DB에 동시에 쓰고, `GuildMusicPlayer` 생성자가 DB에서 다시 읽어 복원합니다. 한쪽만 갱신하면 재시작 시 값이 되돌아갑니다.
 
