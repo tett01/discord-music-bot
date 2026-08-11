@@ -42,11 +42,11 @@ test('길드 설정은 기본값으로 생성된다', () => {
   assert.equal(settings.text_channel_id, null);
 });
 
-test('기본 음량은 25다', () => {
+test('기본 음량은 15다', () => {
   // DDL의 DEFAULT는 이미 만들어진 테이블에 적용되지 않으므로, INSERT가 값을 직접
-  // 넣지 않으면 기존 DB에서만 조용히 옛 기본값(100)이 나온다. 상수를 고정해둔다.
-  assert.equal(DEFAULT_VOLUME, 25);
-  assert.equal(getGuildSettings(nextGuild()).volume, 25);
+  // 넣지 않으면 기존 DB에서만 조용히 옛 기본값이 나온다. 상수를 고정해둔다.
+  assert.equal(DEFAULT_VOLUME, 15);
+  assert.equal(getGuildSettings(nextGuild()).volume, 15);
 });
 
 test('음악 채널 지정과 해제', () => {

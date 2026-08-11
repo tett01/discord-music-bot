@@ -16,7 +16,7 @@ if (dbPath !== ':memory:') {
 // 새 서버가 처음 재생할 때의 음량(%). 100은 대부분의 음성 채널에서 너무 컸다.
 // DDL의 DEFAULT는 이미 만들어진 테이블에는 적용되지 않으므로, INSERT에서도 이 값을
 // 명시적으로 넣는다. 그래야 기존 DB에 새로 들어온 서버도 같은 기본값을 받는다.
-const DEFAULT_VOLUME = 25;
+const DEFAULT_VOLUME = 15;
 
 const db = new DatabaseSync(dbPath);
 // 메모리 DB에는 저널 파일이 없으므로 WAL을 적용하지 않는다.
