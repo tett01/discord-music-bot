@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 같은 브랜치에 새 푸시가 오면 진행 중인 실행을 취소한다.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 내장 node:sqlite를 플래그 없이 쓰려면 23.4 이상이 필요하다. 24 LTS로 고정한다.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      # postinstall에서 ffmpeg/yt-dlp 바이너리를 받는다. 이 단계 자체가
+      # "깨끗한 환경에서 README의 설치 절차가 동작하는가"에 대한 검증이기도 하다.
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 구문 검사
+        run: npm run check
+
+      # 명령어 모듈이 전부 로드되는지, deploy용 JSON으로 직렬화되는지 확인한다.
+      # 디스코드에 실제로 등록하지 않으므로 토큰이 필요 없다.
+      - name: 명령어 스모크 테스트
+        run: npm test
