@@ -37,9 +37,17 @@ test('에러가 아닌 값에도 터지지 않는다', () => {
   }
 });
 
-test('반복 모드는 off/song/queue 세 가지다', () => {
+test('반복 모드는 off/song/queue/last 네 가지다', () => {
   // /반복 명령어의 선택지와 DB의 loop_mode 값이 여기에 묶여 있다.
-  assert.deepEqual(LOOP_MODES, ['off', 'song', 'queue']);
+  assert.deepEqual(LOOP_MODES, ['off', 'song', 'queue', 'last']);
+});
+
+test('/반복 선택지가 LOOP_MODES와 정확히 일치한다', () => {
+  // 모드를 추가하고 명령어 선택지를 빠뜨리면 사용자는 그 모드를 고를 수 없고,
+  // 반대로 선택지만 있으면 setLoopMode가 예외를 던진다. 양쪽을 묶어둔다.
+  const loopCommand = require('../src/commands/loop');
+  const choices = loopCommand.data.toJSON().options[0].choices.map((c) => c.value);
+  assert.deepEqual(choices, LOOP_MODES);
 });
 
 // 아래는 음성 연결 없이 확인할 수 있는 부분만 본다. 재생을 시작하면 yt-dlp를

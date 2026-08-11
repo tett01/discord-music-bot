@@ -2,7 +2,9 @@
 // 않으므로 단독으로 테스트할 수 있다. GuildMusicPlayer는 이 클래스가 정한 "다음 곡"을
 // 받아 재생하는 역할만 한다.
 
-const LOOP_MODES = ['off', 'song', 'queue'];
+// 'last'는 대기열이 남아 있는 동안은 off처럼 순서대로 넘어가고, 다 떨어지면 마지막
+// 곡만 반복한다. 'queue'는 대기열 전체를 순환하므로 마지막 곡 뒤에 첫 곡으로 돌아간다.
+const LOOP_MODES = ['off', 'song', 'queue', 'last'];
 
 class TrackQueue {
   constructor(loopMode = 'off') {
@@ -43,6 +45,7 @@ class TrackQueue {
    *
    * - `song`: 사용자가 건너뛴 게 아니면 같은 곡을 다시 준다.
    * - `queue`: 방금 튼 곡을 대기열 뒤로 돌린 뒤 다음 곡을 꺼낸다.
+   * - `last`: 대기열이 남아 있으면 다음 곡, 다 떨어졌으면 방금 튼 곡을 다시 준다.
    *
    * @returns {object | null} 재생할 곡. 없으면 null이고 current도 null이 된다.
    */
@@ -56,6 +59,12 @@ class TrackQueue {
 
     if (this.loopMode === 'queue' && this.current) {
       this.tracks.push(this.current);
+    }
+
+    // 대기열이 남아 있으면 아래로 흘러가 평소처럼 다음 곡을 꺼낸다. 마지막 곡에서만
+    // 반복이 걸린다. 사용자가 /다음곡으로 끝낸 경우는 멈추는 쪽이 자연스럽다.
+    if (this.loopMode === 'last' && this.current && this.tracks.length === 0 && !forceSkip) {
+      return this.current;
     }
 
     this.current = this.tracks.shift() ?? null;

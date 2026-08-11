@@ -16,8 +16,8 @@ function playing(loopMode, titles) {
 const titleOf = (t) => t?.title ?? null;
 const upcoming = (queue) => queue.tracks.map((t) => t.title);
 
-test('반복 모드는 off/song/queue 세 가지다', () => {
-  assert.deepEqual(LOOP_MODES, ['off', 'song', 'queue']);
+test('반복 모드는 off/song/queue/last 네 가지다', () => {
+  assert.deepEqual(LOOP_MODES, ['off', 'song', 'queue', 'last']);
   assert.equal(new TrackQueue().loopMode, 'off');
   assert.equal(new TrackQueue('이상한값').loopMode, 'off', 'DB에 이상한 값이 있어도 off로 떨어져야 한다');
 });
@@ -104,6 +104,37 @@ test('queue: 건너뛴 곡도 대기열 뒤로 돌아간다', () => {
   queue.requestSkip();
   assert.equal(titleOf(queue.advance()), '2번');
   assert.deepEqual(upcoming(queue), ['1번'], '건너뛴 곡이 사라지면 안 된다');
+});
+
+test('last: 대기열이 남아 있으면 처음으로 돌아가지 않고 다음 곡으로 간다', () => {
+  // queue 모드와 갈리는 지점이다. queue는 A→B→C→A로 순환하지만 last는 끝까지 간다.
+  const queue = playing('last', ['1번', '2번', '3번']);
+  assert.equal(titleOf(queue.advance()), '2번');
+  assert.equal(titleOf(queue.advance()), '3번');
+  assert.deepEqual(upcoming(queue), []);
+});
+
+test('last: 대기열이 떨어지면 마지막 곡을 반복한다', () => {
+  const queue = playing('last', ['1번', '2번']);
+  queue.advance(); // 2번
+  assert.equal(titleOf(queue.advance()), '2번');
+  assert.equal(titleOf(queue.advance()), '2번', '마지막 곡이 계속 반복되어야 한다');
+});
+
+test('last: 반복 중에 곡을 추가하면 그 곡으로 넘어간다', () => {
+  // 마지막 곡을 반복하는 동안 /재생으로 곡을 넣으면 계속 갇혀 있으면 안 된다.
+  const queue = playing('last', ['1번']);
+  assert.equal(titleOf(queue.advance()), '1번');
+  queue.enqueue(track('2번'));
+  assert.equal(titleOf(queue.advance()), '2번');
+});
+
+test('last: 마지막 곡을 건너뛰면 멈춘다', () => {
+  // 사용자가 직접 /다음곡을 눌렀는데 같은 곡이 또 나오면 건너뛰기가 먹지 않는 것처럼 보인다.
+  const queue = playing('last', ['1번']);
+  queue.requestSkip();
+  assert.equal(queue.advance(), null);
+  assert.ok(queue.isEmpty);
 });
 
 test('재생 중 반복 모드를 바꾸면 다음 곡부터 적용된다', () => {

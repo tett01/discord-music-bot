@@ -14,7 +14,8 @@ module.exports = {
         .addChoices(
           { name: '끄기', value: 'off' },
           { name: '현재 곡 반복', value: 'song' },
-          { name: '전체 곡(대기열) 반복', value: 'queue' }
+          { name: '전체 곡(대기열) 반복', value: 'queue' },
+          { name: '마지막 곡 반복 (대기열은 순서대로)', value: 'last' }
         )
     ),
 
@@ -23,7 +24,12 @@ module.exports = {
     const player = getPlayer(interaction.guildId, interaction.channel);
     player.setLoopMode(mode);
 
-    const labels = { off: '반복 끄기', song: '현재 곡 반복', queue: '전체 곡 반복' };
+    const labels = {
+      off: '반복 끄기',
+      song: '현재 곡 반복',
+      queue: '전체 곡 반복',
+      last: '마지막 곡 반복 (대기열은 순서대로)',
+    };
     return interaction.reply(`🔁 반복 모드: **${labels[mode]}**`);
   },
 };
