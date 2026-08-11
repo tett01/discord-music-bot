@@ -54,6 +54,10 @@ npm test
 
 **메모리** — [musicManager.js](src/musicManager.js)의 `GuildMusicPlayer` 인스턴스를 `guildId` 키의 `Map`으로 보관합니다. 음성 연결, 대기열, 현재 곡, ffmpeg/yt-dlp 프로세스가 여기 있습니다. **재시작하면 전부 사라집니다.**
 
+그중 **대기열과 반복 모드의 전이 규칙은 [trackQueue.js](src/trackQueue.js)의 `TrackQueue`로 떼어냈습니다.** 디스코드·음성 연결에 의존하지 않아 단독으로 테스트할 수 있습니다. "다음에 뭘 틀지"는 `advance()`가 정하고, `GuildMusicPlayer`는 그 결과를 재생만 합니다. 이 규칙을 고칠 때는 `musicManager.js`가 아니라 여기를 보세요.
+
+`player.queue` / `player.current` / `player.loopMode`는 `TrackQueue`를 비추는 **getter**입니다. 명령어 쪽에서 읽기만 하며, **대입하면 터집니다** — 상태를 바꾸려면 `player.tracks`의 메서드를 쓰세요.
+
 **SQLite** — [db.js](src/db.js)의 `data/bot.sqlite`. 음량, 반복 모드, 음악 채널 지정, 플레이리스트가 들어 있습니다. `db.js`는 `require` 시점에 DB를 열고 스키마 DDL을 실행합니다(모듈 부작용). `.gitignore` 대상이라 저장소에 없으며, 이 파일이 유일한 사본입니다.
 
 경로는 `BOT_DB_PATH` 환경변수로 바꿀 수 있습니다. **테스트는 `require` 전에 이 값을 `':memory:'`로 지정해야 합니다** — 지정하지 않으면 운영 DB를 건드립니다. `db.js`를 직간접적으로 `require`하는 테스트 파일 맨 위에 넣으세요.
@@ -82,7 +86,7 @@ Opus 인코더 비트레이트는 음성 채널 입장 시점에 캐시한 `voic
 ### 재생 흐름의 비자명한 규칙
 
 - **의도적 스트림 종료는 오류가 아닙니다.** `ERR_STREAM_PREMATURE_CLOSE`, `EPIPE`, `ECONNRESET`, `ABORT_ERR`는 `BENIGN_STREAM_ERRORS`로 걸러 사용자에게 알리지 않습니다. 정지·건너뛰기의 정상 부산물입니다.
-- **`_forceSkip` 플래그**가 사용자의 `/다음곡`과 곡의 자연 종료를 구분합니다. 이게 없으면 `loop: song` 모드에서 건너뛰기가 같은 곡을 다시 재생합니다.
+- **`_forceSkip` 플래그**가 사용자의 `/다음곡`과 곡의 자연 종료를 구분합니다. 이게 없으면 `loop: song` 모드에서 건너뛰기가 같은 곡을 다시 재생합니다. `requestSkip()`이 세우고 `advance()`가 한 번 쓴 뒤 내립니다 — **다음 곡으로 넘어간 뒤에도 남아 있으면 그 곡의 반복이 걸리지 않습니다.**
 - **서버당 음성 연결은 하나뿐**입니다(디스코드 제약). 다른 채널에서 `/재생`하면 기존 채널에 봇이 아닌 사람이 없을 때만 대기열을 유지한 채 이동하고, 있으면 예외를 던져 거절합니다.
 - **5분 유휴 시 자동 퇴장** (`IDLE_TIMEOUT_MS`).
 - `SIGINT`/`SIGTERM`에서 `destroyAllPlayers()`로 음성 연결을 정리한 뒤 종료합니다. 이걸 건너뛰면 봇이 음성 채널에 유령으로 남습니다.

@@ -4,7 +4,17 @@ process.env.BOT_DB_PATH = ':memory:';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { isBenignStreamError, LOOP_MODES } = require('../src/musicManager');
+const {
+  isBenignStreamError,
+  LOOP_MODES,
+  getPlayer,
+  getExistingPlayer,
+  destroyAllPlayers,
+} = require('../src/musicManager');
+const { getGuildSettings, setLoopMode } = require('../src/db');
+
+let counter = 0;
+const nextGuild = () => `guild-${++counter}`;
 
 test('의도적인 스트림 종료는 오류로 보지 않는다', () => {
   // 정지·건너뛰기의 정상 부산물이다. 여기서 false가 나오면 사용자에게
@@ -30,4 +40,75 @@ test('에러가 아닌 값에도 터지지 않는다', () => {
 test('반복 모드는 off/song/queue 세 가지다', () => {
   // /반복 명령어의 선택지와 DB의 loop_mode 값이 여기에 묶여 있다.
   assert.deepEqual(LOOP_MODES, ['off', 'song', 'queue']);
+});
+
+// 아래는 음성 연결 없이 확인할 수 있는 부분만 본다. 재생을 시작하면 yt-dlp를
+// 띄우므로 enqueue는 건드리지 않는다.
+
+test('getPlayer는 서버당 하나를 재사용하고 getExistingPlayer는 없으면 null이다', () => {
+  const guildId = nextGuild();
+
+  assert.equal(getExistingPlayer(guildId), null);
+
+  const player = getPlayer(guildId);
+  assert.equal(getPlayer(guildId), player, '같은 서버에는 같은 인스턴스를 줘야 한다');
+  assert.equal(getExistingPlayer(guildId), player);
+
+  player.destroy();
+  assert.equal(getExistingPlayer(guildId), null, 'destroy 후에는 맵에서 빠져야 한다');
+});
+
+test('플레이어는 DB에 저장된 음량·반복 모드로 복원된다', () => {
+  // 메모리와 DB 중 한쪽만 갱신하면 재시작 시 값이 되돌아간다.
+  const guildId = nextGuild();
+  setLoopMode(guildId, 'queue');
+
+  const player = getPlayer(guildId);
+  assert.equal(player.loopMode, 'queue');
+  assert.equal(player.volume, getGuildSettings(guildId).volume);
+
+  player.destroy();
+});
+
+test('setLoopMode는 메모리와 DB 양쪽에 쓴다', () => {
+  const guildId = nextGuild();
+  const player = getPlayer(guildId);
+
+  player.setLoopMode('song');
+  assert.equal(player.loopMode, 'song');
+  assert.equal(getGuildSettings(guildId).loop_mode, 'song');
+
+  assert.throws(() => player.setLoopMode('shuffle'), /알 수 없는 반복 모드/);
+  assert.equal(player.loopMode, 'song', '거부된 값이 반영되면 안 된다');
+
+  player.destroy();
+});
+
+test('queue/current는 TrackQueue를 그대로 비춘다', () => {
+  // 명령어들이 player.queue와 player.current를 직접 읽는다.
+  const guildId = nextGuild();
+  const player = getPlayer(guildId);
+
+  assert.deepEqual(player.queue, []);
+  assert.equal(player.current, null);
+
+  player.tracks.enqueue({ title: '1번', url: 'https://youtu.be/1' });
+  assert.deepEqual(player.queue.map((t) => t.title), ['1번']);
+
+  player.clearQueue();
+  assert.deepEqual(player.queue, []);
+
+  player.destroy();
+});
+
+test('destroyAllPlayers가 남은 플레이어를 모두 정리한다', () => {
+  // 이걸 건너뛰면 봇이 음성 채널에 유령으로 남는다.
+  const guilds = [nextGuild(), nextGuild()];
+  for (const guildId of guilds) getPlayer(guildId);
+
+  destroyAllPlayers();
+
+  for (const guildId of guilds) {
+    assert.equal(getExistingPlayer(guildId), null);
+  }
 });
