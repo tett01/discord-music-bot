@@ -54,7 +54,9 @@ npm test
 
 **메모리** — [musicManager.js](src/musicManager.js)의 `GuildMusicPlayer` 인스턴스를 `guildId` 키의 `Map`으로 보관합니다. 음성 연결, 대기열, 현재 곡, ffmpeg/yt-dlp 프로세스가 여기 있습니다. **재시작하면 전부 사라집니다.**
 
-**SQLite** — [db.js](src/db.js)의 `data/bot.sqlite`. 음량, 반복 모드, 음악 채널 지정, 플레이리스트가 들어 있습니다. `db.js`는 `require` 시점에 스키마 DDL을 실행합니다(모듈 부작용). `.gitignore` 대상이라 저장소에 없으며, 이 파일이 유일한 사본입니다.
+**SQLite** — [db.js](src/db.js)의 `data/bot.sqlite`. 음량, 반복 모드, 음악 채널 지정, 플레이리스트가 들어 있습니다. `db.js`는 `require` 시점에 DB를 열고 스키마 DDL을 실행합니다(모듈 부작용). `.gitignore` 대상이라 저장소에 없으며, 이 파일이 유일한 사본입니다.
+
+경로는 `BOT_DB_PATH` 환경변수로 바꿀 수 있습니다. **테스트는 `require` 전에 이 값을 `':memory:'`로 지정해야 합니다** — 지정하지 않으면 운영 DB를 건드립니다. `db.js`를 직간접적으로 `require`하는 테스트 파일 맨 위에 넣으세요.
 
 음량과 반복 모드는 **양쪽에 다 있습니다.** `setVolume`/`setLoopMode`는 메모리와 DB에 동시에 쓰고, `GuildMusicPlayer` 생성자가 DB에서 다시 읽어 복원합니다. 한쪽만 갱신하면 재시작 시 값이 되돌아갑니다.
 
@@ -99,6 +101,7 @@ Opus 인코더 비트레이트는 음성 채널 입장 시점에 캐시한 `voic
 - 인텐트는 `Guilds`와 `GuildVoiceStates` 둘뿐입니다. 메시지 내용이나 멤버 목록에 의존하는 기능은 추가할 수 없습니다(Privileged Intent 필요).
 - yt-dlp 호출처럼 수 초가 걸리는 작업은 `deferReply()` 후 `editReply()`로 응답합니다.
 - 플레이리스트 곡 번호는 **DB에서 0-based `position`, 사용자에게는 1-based**입니다. `playlist.js`에서 `position - 1`로 변환합니다.
+- **`position`은 항상 0부터 빈틈없이 이어져야 합니다.** `/플레이리스트 목록`은 표시 순서(배열 인덱스)로 번호를 매기는데 `/플레이리스트 곡삭제`는 `position` 값으로 지우기 때문에, 구멍이 남으면 사용자가 본 번호와 다른 곡이 지워집니다. `removeTrackFromPlaylist`가 삭제 후 재정렬하고 `addTrackToPlaylist`는 `MAX(position) + 1`을 씁니다(`COUNT(*)`는 충돌합니다).
 
 ## 문제 해결
 

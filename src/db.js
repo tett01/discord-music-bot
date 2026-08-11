@@ -4,11 +4,18 @@ const fs = require('node:fs');
 // 함께 로드될 때 프로세스가 SIGABRT로 죽는 충돌이 있어 사용하지 않는다.
 const { DatabaseSync } = require('node:sqlite');
 
-const dataDir = path.join(__dirname, '..', 'data');
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+// 기본값은 data/bot.sqlite다. 테스트에서 운영 DB를 건드리지 않도록 BOT_DB_PATH로
+// 경로를 바꿀 수 있게 열어뒀다. (테스트는 ':memory:'를 쓴다)
+const dbPath = process.env.BOT_DB_PATH || path.join(__dirname, '..', 'data', 'bot.sqlite');
 
-const db = new DatabaseSync(path.join(dataDir, 'bot.sqlite'));
-db.exec('PRAGMA journal_mode = WAL');
+if (dbPath !== ':memory:') {
+  const dataDir = path.dirname(dbPath);
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+}
+
+const db = new DatabaseSync(dbPath);
+// 메모리 DB에는 저널 파일이 없으므로 WAL을 적용하지 않는다.
+if (dbPath !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS guild_settings (
@@ -86,18 +93,35 @@ function deletePlaylist(guildId, name) {
 }
 
 function addTrackToPlaylist(playlistId, title, url) {
-  const { count } = db
-    .prepare('SELECT COUNT(*) AS count FROM playlist_tracks WHERE playlist_id = ?')
+  // COUNT(*)가 아니라 MAX(position)+1을 쓴다. 곡 수와 position 최대값이 어긋난
+  // 상태에서 COUNT를 쓰면 기존 곡과 position이 충돌한다.
+  const { next } = db
+    .prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM playlist_tracks WHERE playlist_id = ?')
     .get(playlistId);
   db.prepare(
     'INSERT INTO playlist_tracks (playlist_id, title, url, position) VALUES (?, ?, ?, ?)'
-  ).run(playlistId, title, url, count);
+  ).run(playlistId, title, url, next);
 }
 
+/**
+ * 곡을 지우고 남은 곡의 position을 0부터 다시 매긴다.
+ *
+ * 재정렬은 선택이 아니다. `/플레이리스트 목록`은 표시 순서(배열 인덱스)로 번호를
+ * 매기는데 `/플레이리스트 곡삭제`는 position 값으로 지운다. 구멍이 남으면 둘이
+ * 어긋나 사용자가 본 번호와 다른 곡이 지워진다.
+ */
 function removeTrackFromPlaylist(playlistId, position) {
-  return db
+  const result = db
     .prepare('DELETE FROM playlist_tracks WHERE playlist_id = ? AND position = ?')
     .run(playlistId, position);
+
+  if (result.changes > 0) {
+    db.prepare(
+      'UPDATE playlist_tracks SET position = position - 1 WHERE playlist_id = ? AND position > ?'
+    ).run(playlistId, position);
+  }
+
+  return result;
 }
 
 function getPlaylistTracks(playlistId) {
