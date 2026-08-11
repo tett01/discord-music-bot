@@ -11,11 +11,11 @@ const prism = require('prism-media');
 
 const { spawnAudioStream } = require('./youtube');
 const { getGuildSettings, setVolume: persistVolume, setLoopMode: persistLoopMode } = require('./db');
+const { TrackQueue, LOOP_MODES } = require('./trackQueue');
 
 /** @type {Map<string, GuildMusicPlayer>} */
 const players = new Map();
 
-const LOOP_MODES = ['off', 'song', 'queue'];
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
 // 정지/건너뛰기로 스트림을 의도적으로 끊을 때 나는 오류들. 실제 고장이 아니므로 알리지 않는다.
@@ -36,15 +36,14 @@ class GuildMusicPlayer {
     this.textChannel = textChannel;
     this.connection = null;
     this.audioPlayer = createAudioPlayer();
-    this.queue = [];
-    this.current = null;
     this.resource = null;
     this.sourceProcess = null;
     this.idleTimer = null;
-    this._forceSkip = false;
 
     const settings = getGuildSettings(guildId);
-    this.loopMode = settings.loop_mode;
+    // 대기열·반복 모드는 TrackQueue가 관리한다. queue/current/loopMode는 아래 getter로
+    // 그대로 노출하므로 명령어 쪽 코드는 바뀌지 않는다.
+    this.tracks = new TrackQueue(settings.loop_mode);
     this.volume = settings.volume;
 
     this.audioPlayer.on(AudioPlayerStatus.Idle, () => {
@@ -57,6 +56,19 @@ class GuildMusicPlayer {
       }
       this._handleTrackEnd().catch((err) => this._reportError('다음 곡 재생 실패', err));
     });
+  }
+
+  // 명령어들이 player.queue / player.current / player.loopMode를 직접 읽는다.
+  get queue() {
+    return this.tracks.tracks;
+  }
+
+  get current() {
+    return this.tracks.current;
+  }
+
+  get loopMode() {
+    return this.tracks.loopMode;
   }
 
   /**
@@ -161,7 +173,7 @@ class GuildMusicPlayer {
   }
 
   async enqueue(track) {
-    this.queue.push(track);
+    this.tracks.enqueue(track);
     if (this.audioPlayer.state.status === AudioPlayerStatus.Idle && !this.current) {
       await this._playNext();
     }
@@ -169,7 +181,7 @@ class GuildMusicPlayer {
 
   skip() {
     // 한 곡 반복 중이어도 skip은 무조건 다음 곡으로 넘어가야 한다.
-    this._forceSkip = true;
+    this.tracks.requestSkip();
     this.audioPlayer.stop(true);
   }
 
@@ -182,8 +194,8 @@ class GuildMusicPlayer {
   }
 
   setLoopMode(mode) {
-    if (!LOOP_MODES.includes(mode)) throw new Error('알 수 없는 반복 모드입니다.');
-    this.loopMode = mode;
+    // 메모리와 DB 양쪽에 쓴다. 한쪽만 갱신하면 재시작 시 값이 되돌아간다.
+    this.tracks.setLoopMode(mode);
     persistLoopMode(this.guildId, mode);
   }
 
@@ -196,14 +208,13 @@ class GuildMusicPlayer {
   }
 
   clearQueue() {
-    this.queue = [];
+    this.tracks.clear();
   }
 
   destroy() {
     this._clearIdleTimer();
     this._killSource();
-    this.queue = [];
-    this.current = null;
+    this.tracks.reset();
     try {
       this.audioPlayer.stop(true);
     } catch {
@@ -221,22 +232,10 @@ class GuildMusicPlayer {
   }
 
   async _playNext() {
-    const forceSkip = this._forceSkip;
-    this._forceSkip = false;
-
-    if (this.loopMode === 'song' && this.current && !forceSkip) {
-      await this._play(this.current);
-      return;
-    }
-
-    if (this.loopMode === 'queue' && this.current) {
-      this.queue.push(this.current);
-    }
-
-    const next = this.queue.shift();
+    // 다음에 뭘 틀지는 TrackQueue가 정한다. 여기서는 그 결과를 재생만 한다.
+    const next = this.tracks.advance();
     if (!next) {
       this._killSource();
-      this.current = null;
       this._startIdleTimer();
       return;
     }
@@ -247,7 +246,6 @@ class GuildMusicPlayer {
   async _play(track) {
     this._clearIdleTimer();
     this._killSource();
-    this.current = track;
 
     // yt-dlp가 오디오를 직접 받아 stdout으로 넘기고, ffmpeg는 그 파이프를 읽는다.
     const source = spawnAudioStream(track.url);
@@ -315,7 +313,7 @@ class GuildMusicPlayer {
   }
 
   async _handleTrackEnd() {
-    if (!this.current && this.queue.length === 0) return;
+    if (this.tracks.isEmpty) return;
     await this._playNext();
   }
 
@@ -333,7 +331,7 @@ class GuildMusicPlayer {
   _startIdleTimer() {
     this._clearIdleTimer();
     this.idleTimer = setTimeout(() => {
-      if (!this.current && this.queue.length === 0) {
+      if (this.tracks.isEmpty) {
         this._notify('⏳ 재생할 곡이 없어 음성 채널에서 나갑니다.');
         this.destroy();
       }
