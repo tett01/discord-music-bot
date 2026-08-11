@@ -83,6 +83,15 @@ npm test
 - `getPlayer(guildId, textChannel)` — 없으면 **생성**. 재생을 시작하거나 설정을 저장하는 명령어용 (`/재생`, `/음량`, `/반복`)
 - `getExistingPlayer(guildId)` — 없으면 `null`. 재생 중이어야만 의미가 있는 명령어용 (`/다음곡`, `/정지`, `/대기열`)
 
+### 멜론 차트 캐싱
+
+[melon.js](src/melon.js)가 멜론 인기차트 TOP 10을 **1시간마다 한 번만** 긁어 메모리에 담고, `/멜론차트`는 캐시만 읽습니다. 명령어마다 크롤링하면 요청이 사용자 수만큼 늘어 차단당합니다. `startMelonChartRefresh()`는 `ClientReady`에서 시작하고 `shutdown()`에서 멈춥니다.
+
+- **기본 UA로는 응답이 거부됩니다.** `MELON_HEADERS`의 `User-Agent`/`Referer`가 있어야 200이 옵니다.
+- 파싱은 의존성을 늘리지 않으려고 정규식으로 합니다. `parseMelonChart(html, limit)`은 네트워크에 의존하지 않는 순수 함수라 [test/melon.test.js](test/melon.test.js)에서 단독으로 검증합니다.
+- **파싱 결과가 비면 캐시를 덮어쓰지 않습니다.** 멜론이 마크업을 바꾸면 빈 배열이 나오는데, 그대로 반영하면 멀쩡한 캐시까지 날아갑니다. `refreshMelonChart`가 이때 로그만 남기고 이전 값을 유지합니다.
+- 태그를 공백으로 치환해 텍스트를 뽑기 때문에 `</a>, <a>` 구분자가 `"A , B"`가 됩니다. `stripTags`의 쉼표 앞 공백 제거가 이걸 되돌립니다.
+
 ### 오디오 파이프라인
 
 ```

@@ -4,6 +4,7 @@ const { Client, GatewayIntentBits, Events, MessageFlags } = require('discord.js'
 const { loadCommands } = require('./loadCommands');
 const { getGuildSettings } = require('./db');
 const { destroyAllPlayers } = require('./musicManager');
+const { startMelonChartRefresh, stopMelonChartRefresh } = require('./melon');
 
 const { DISCORD_TOKEN } = process.env;
 
@@ -20,6 +21,8 @@ const commands = loadCommands();
 
 client.once(Events.ClientReady, (c) => {
   console.log(`✅ 로그인 완료: ${c.user.tag}`);
+  // 즉시 한 번 받고 이후 1시간마다 갱신한다. /멜론차트는 이 캐시만 읽는다.
+  startMelonChartRefresh();
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -62,6 +65,7 @@ async function shutdown(signal) {
   shuttingDown = true;
   console.log(`\n${signal} 수신 — 정리 후 종료합니다.`);
   try {
+    stopMelonChartRefresh();
     destroyAllPlayers();
     await client.destroy();
   } catch (error) {
