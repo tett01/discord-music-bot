@@ -13,6 +13,11 @@ if (dbPath !== ':memory:') {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 }
 
+// 새 서버가 처음 재생할 때의 음량(%). 100은 대부분의 음성 채널에서 너무 컸다.
+// DDL의 DEFAULT는 이미 만들어진 테이블에는 적용되지 않으므로, INSERT에서도 이 값을
+// 명시적으로 넣는다. 그래야 기존 DB에 새로 들어온 서버도 같은 기본값을 받는다.
+const DEFAULT_VOLUME = 25;
+
 const db = new DatabaseSync(dbPath);
 // 메모리 DB에는 저널 파일이 없으므로 WAL을 적용하지 않는다.
 if (dbPath !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
@@ -21,7 +26,7 @@ db.exec(`
 CREATE TABLE IF NOT EXISTS guild_settings (
   guild_id TEXT PRIMARY KEY,
   text_channel_id TEXT,
-  volume INTEGER NOT NULL DEFAULT 100,
+  volume INTEGER NOT NULL DEFAULT ${DEFAULT_VOLUME},
   loop_mode TEXT NOT NULL DEFAULT 'off'
 );
 
@@ -45,7 +50,7 @@ CREATE TABLE IF NOT EXISTS playlist_tracks (
 function getGuildSettings(guildId) {
   let row = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guildId);
   if (!row) {
-    db.prepare('INSERT INTO guild_settings (guild_id) VALUES (?)').run(guildId);
+    db.prepare('INSERT INTO guild_settings (guild_id, volume) VALUES (?, ?)').run(guildId, DEFAULT_VOLUME);
     row = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guildId);
   }
   return row;
@@ -135,6 +140,7 @@ module.exports = {
   getGuildSettings,
   setTextChannel,
   clearTextChannel,
+  DEFAULT_VOLUME,
   setVolume,
   setLoopMode,
   createPlaylist,
