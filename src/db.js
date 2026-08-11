@@ -49,6 +49,12 @@ function setTextChannel(guildId, channelId) {
   db.prepare('UPDATE guild_settings SET text_channel_id = ? WHERE guild_id = ?').run(channelId, guildId);
 }
 
+/** 음악 채널 지정을 해제한다. (모든 채널에서 음악 명령어 사용 가능한 초기 상태로 되돌린다) */
+function clearTextChannel(guildId) {
+  getGuildSettings(guildId);
+  db.prepare('UPDATE guild_settings SET text_channel_id = NULL WHERE guild_id = ?').run(guildId);
+}
+
 function setVolume(guildId, volume) {
   getGuildSettings(guildId);
   db.prepare('UPDATE guild_settings SET volume = ? WHERE guild_id = ?').run(volume, guildId);
@@ -104,6 +110,7 @@ module.exports = {
   db,
   getGuildSettings,
   setTextChannel,
+  clearTextChannel,
   setVolume,
   setLoopMode,
   createPlaylist,
