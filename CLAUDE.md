@@ -20,7 +20,17 @@ npm start
 
 24시간 운영은 pm2를 씁니다: `pm2 start ecosystem.config.js`, `pm2 restart music-bot`, `pm2 logs music-bot`.
 
-**테스트 프레임워크와 린터가 없습니다.** 검증은 봇을 띄워 실제 디스코드 서버에서 명령어를 실행하는 방식뿐입니다.
+```bash
+npm run check
+```
+
+```bash
+npm test
+```
+
+`npm run check`는 모든 소스를 `node --check`로 구문 검사하고, `npm test`는 Node 내장 러너(`node --test`)로 명령어 모듈 스모크 테스트를 돌립니다. 둘 다 디스코드 토큰이 필요 없으며 [.github/workflows/ci.yml](.github/workflows/ci.yml)에서 push·PR마다 실행됩니다.
+
+**린터는 없고, 테스트는 "명령어가 로드되고 등록 가능한가"까지만 봅니다.** 재생·음성 연결·yt-dlp 같은 실제 동작 검증은 여전히 봇을 띄워 디스코드 서버에서 명령어를 실행하는 방식뿐입니다.
 
 ## 아키텍처
 

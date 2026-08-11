@@ -8,7 +8,9 @@
   "license": "UNLICENSED",
   "scripts": {
     "start": "node src/index.js",
-    "deploy": "node src/deploy-commands.js"
+    "deploy": "node src/deploy-commands.js",
+    "check": "node scripts/check-syntax.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@discordjs/opus": "^0.9.0",
