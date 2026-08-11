@@ -70,6 +70,10 @@ npm test
 
 그중 **대기열과 반복 모드의 전이 규칙은 [trackQueue.js](src/trackQueue.js)의 `TrackQueue`로 떼어냈습니다.** 디스코드·음성 연결에 의존하지 않아 단독으로 테스트할 수 있습니다. "다음에 뭘 틀지"는 `advance()`가 정하고, `GuildMusicPlayer`는 그 결과를 재생만 합니다. 이 규칙을 고칠 때는 `musicManager.js`가 아니라 여기를 보세요.
 
+반복 모드는 네 가지이고 **`queue`와 `last`가 헷갈리기 쉽습니다.** `queue`는 대기열 전체를 순환해 마지막 곡 뒤에 첫 곡으로 돌아가고, `last`는 대기열이 남아 있는 동안 `off`처럼 순서대로 넘어가다가 다 떨어지면 마지막 곡만 반복합니다. 곡이 하나뿐이면 둘의 동작이 같아 보이므로, **모드를 검증할 때는 3곡 이상으로 확인하세요.**
+
+`LOOP_MODES`에 모드를 추가하면 [loop.js](src/commands/loop.js)의 `addChoices`와 `labels`도 같이 고쳐야 합니다. 선택지를 빠뜨리면 사용자가 고를 수 없고, 반대로 선택지만 추가하면 `setLoopMode`가 예외를 던집니다. `musicManager.test.js`가 둘의 일치를 검사하며, **선택지가 바뀌었으므로 `npm run deploy`가 필요합니다.**
+
 `player.queue` / `player.current` / `player.loopMode`는 `TrackQueue`를 비추는 **getter**입니다. 명령어 쪽에서 읽기만 하며, **대입하면 터집니다** — 상태를 바꾸려면 `player.tracks`의 메서드를 쓰세요.
 
 **SQLite** — [db.js](src/db.js)의 `data/bot.sqlite`. 음량, 반복 모드, 음악 채널 지정, 플레이리스트가 들어 있습니다. `db.js`는 `require` 시점에 DB를 열고 스키마 DDL을 실행합니다(모듈 부작용). `.gitignore` 대상이라 저장소에 없으며, 이 파일이 유일한 사본입니다.
