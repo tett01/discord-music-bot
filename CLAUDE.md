@@ -36,7 +36,7 @@ npm start
 
 `data.name`이나 `execute`가 없으면 **경고 없이 조용히 건너뜁니다.** 명령어가 나타나지 않으면 이 조건부터 확인하세요.
 
-`musicCommand: true`인 명령어만 [index.js](src/index.js)의 텍스트 채널 제한(`/음악채널설정`으로 지정한 채널)을 적용받습니다. 이 필드를 빠뜨리면 falsy로 취급되어 **제한을 우회**하므로, 음악 관련 명령어에는 반드시 명시하세요.
+`musicCommand: true`인 명령어만 [index.js](src/index.js)의 텍스트 채널 제한(`/음악채널설정`으로 지정한 채널)을 적용받습니다. 이 필드를 빠뜨리면 falsy로 취급되어 **제한을 우회**하므로, 음악 관련 명령어에는 반드시 명시하세요. 제한의 켜짐/꺼짐은 `text_channel_id`의 `NULL` 여부로만 판별합니다 — `setTextChannel`이 켜고 `clearTextChannel`이 끕니다.
 
 ### 상태의 이중 구조
 
@@ -44,7 +44,7 @@ npm start
 
 **메모리** — [musicManager.js](src/musicManager.js)의 `GuildMusicPlayer` 인스턴스를 `guildId` 키의 `Map`으로 보관합니다. 음성 연결, 대기열, 현재 곡, ffmpeg/yt-dlp 프로세스가 여기 있습니다. **재시작하면 전부 사라집니다.**
 
-**SQLite** — [db.js](src/db.js)의 `data/bot.sqlite`. 음량, 반복 모드, 음악 채널 지정, 플레이리스트가 들어 있습니다. `db.js`는 `require` 시점에 스키마 DDL을 실행합니다(모듈 부작용).
+**SQLite** — [db.js](src/db.js)의 `data/bot.sqlite`. 음량, 반복 모드, 음악 채널 지정, 플레이리스트가 들어 있습니다. `db.js`는 `require` 시점에 스키마 DDL을 실행합니다(모듈 부작용). `.gitignore` 대상이라 저장소에 없으며, 이 파일이 유일한 사본입니다.
 
 음량과 반복 모드는 **양쪽에 다 있습니다.** `setVolume`/`setLoopMode`는 메모리와 DB에 동시에 쓰고, `GuildMusicPlayer` 생성자가 DB에서 다시 읽어 복원합니다. 한쪽만 갱신하면 재시작 시 값이 되돌아갑니다.
 
@@ -62,6 +62,8 @@ yt-dlp (spawn) → stdout → prism.FFmpeg → s16le raw → AudioResource → A
 **yt-dlp가 뽑은 스트림 URL을 ffmpeg가 직접 열게 바꾸지 마세요.** 그 URL은 yt-dlp가 쓴 클라이언트/헤더에 묶여 있어 ffmpeg의 요청은 403 Forbidden으로 거부됩니다. yt-dlp가 직접 받아 파이프로 넘기는 현재 구조가 이 문제를 피하는 방식입니다.
 
 yt-dlp 바이너리는 `yt-dlp-exec/src/constants`에서 경로만 가져오고 실행은 `node:child_process`로 직접 합니다([youtube.js](src/youtube.js)). 패키지의 execa 래퍼는 쓰지 않습니다.
+
+**`resolveTrack()`의 실패를 사용자에게 보여줄 때는 반드시 `describeTrackError(error)`를 거치세요.** 연령·지역·멤버십 제한, 라이브, 삭제, 타임아웃은 봇 고장이 아니라 정상적인 제약이며, 이 함수가 yt-dlp stderr를 사유별 문장으로 옮깁니다. 원본 에러 메시지를 그대로 노출하거나 "영상을 찾지 못했습니다"로 뭉뚱그리지 마세요. 새 사유를 추가하려면 `ERROR_HINTS` 배열에 넣으며, **구체적인 패턴일수록 앞에** 둬야 합니다(위에서부터 첫 일치를 씁니다).
 
 Opus 인코더 비트레이트는 음성 채널 입장 시점에 캐시한 `voiceChannelBitrate`를 트랙마다 적용합니다. **prism이 16k~128k로 클램프하므로 실효 상한은 128 kbps**이고, 채널 비트레이트를 그 이상 올려도 반영되지 않습니다. 캐시는 `join()`에서만 갱신되므로 채널 비트레이트를 바꾸면 재입장이 필요합니다.
 
