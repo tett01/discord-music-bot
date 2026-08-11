@@ -1,4 +1,8 @@
 // 테스트 프레임워크 없이 Node 내장 러너(node --test)만 쓴다. 의존성을 늘리지 않기 위해서다.
+
+// 명령어 모듈이 db.js를 require하므로, 운영 DB를 건드리지 않도록 메모리 DB를 쓴다.
+process.env.BOT_DB_PATH = ':memory:';
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

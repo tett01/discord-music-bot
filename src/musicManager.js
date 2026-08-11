@@ -383,4 +383,6 @@ function destroyAllPlayers() {
   }
 }
 
-module.exports = { getPlayer, getExistingPlayer, destroyAllPlayers, LOOP_MODES };
+// isBenignStreamError는 내부용이지만, 여기에 없는 코드가 들어오면 정지·건너뛰기의
+// 정상 부산물이 사용자에게 오류로 보이므로 테스트할 수 있게 내보낸다.
+module.exports = { getPlayer, getExistingPlayer, destroyAllPlayers, LOOP_MODES, isBenignStreamError };
