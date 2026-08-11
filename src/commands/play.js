@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { getPlayer } = require('../musicManager');
-const { resolveTrack } = require('../youtube');
+const { resolveTrack, describeTrackError } = require('../youtube');
 
 module.exports = {
   musicCommand: true,
@@ -25,7 +25,7 @@ module.exports = {
       track = await resolveTrack(query);
     } catch (error) {
       console.error('[재생] 트랙 검색 실패:', error);
-      return interaction.editReply('영상을 찾지 못했습니다. 링크나 검색어를 확인해주세요.');
+      return interaction.editReply(describeTrackError(error));
     }
 
     const player = getPlayer(interaction.guildId, interaction.channel);

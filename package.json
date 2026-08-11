@@ -4,6 +4,8 @@
   "description": "유튜브 음악 재생 및 플레이리스트 기능을 지원하는 디스코드 음악 봇",
   "main": "src/index.js",
   "type": "commonjs",
+  "private": true,
+  "license": "UNLICENSED",
   "scripts": {
     "start": "node src/index.js",
     "deploy": "node src/deploy-commands.js"

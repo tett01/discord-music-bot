@@ -28,6 +28,11 @@ function runYtdlp(args) {
       { maxBuffer: 32 * 1024 * 1024, timeout: 60_000, windowsHide: true },
       (error, stdout, stderr) => {
         if (error) {
+          // timeout으로 우리가 죽인 경우 stderr가 비어 있어 원인을 알 수 없다.
+          if (error.killed) {
+            reject(new Error('yt-dlp 응답 시간 초과'));
+            return;
+          }
           const detail = String(stderr || error.message).trim().split('\n').slice(-3).join(' ');
           reject(new Error(`yt-dlp 실행 실패: ${detail}`));
           return;
@@ -36,6 +41,39 @@ function runYtdlp(args) {
       }
     );
   });
+}
+
+// yt-dlp가 stderr로 남기는 대표적인 실패 사유를 사용자에게 보여줄 문장으로 옮긴다.
+// 순서가 중요하다. 위쪽일수록 구체적인 사유이므로 먼저 검사한다.
+const ERROR_HINTS = [
+  [/confirm your age|age.restricted/i, '🔞 연령 제한이 걸린 영상이라 재생할 수 없습니다.'],
+  [/members.only|join this channel/i, '💳 멤버십 전용 영상이라 재생할 수 없습니다.'],
+  [/private video/i, '🔒 비공개 영상입니다.'],
+  [/available in your country|blocked it in your country|geo.restricted/i, '🌍 지역 제한으로 재생할 수 없는 영상입니다.'],
+  [/live event will begin|premieres in|not currently live/i, '📡 아직 시작하지 않은 라이브/프리미어 영상입니다.'],
+  [/video unavailable|has been removed|no longer available|does not exist/i, '🗑️ 삭제되었거나 이용할 수 없는 영상입니다.'],
+  [/시간 초과|timed out|ETIMEDOUT/i, '⌛ 유튜브 응답이 너무 느립니다. 잠시 후 다시 시도해주세요.'],
+  [
+    /HTTP Error 4\d\d|failed to extract|unable to extract|nsig extraction/i,
+    '⚠️ 유튜브에서 영상 정보를 가져오지 못했습니다. yt-dlp가 오래되었을 수 있습니다. (README의 문제 해결 참고)',
+  ],
+];
+
+/**
+ * 트랙 조회 실패 원인을 사용자에게 보여줄 문장으로 바꾼다.
+ *
+ * 실패 사유가 전부 "영상을 찾지 못했습니다"로 뭉뚱그려지면, 연령 제한처럼
+ * 정상적인 제약도 봇 고장으로 오해하게 된다.
+ *
+ * @param {unknown} error
+ * @returns {string}
+ */
+function describeTrackError(error) {
+  const message = String(error?.message ?? '');
+  for (const [pattern, hint] of ERROR_HINTS) {
+    if (pattern.test(message)) return hint;
+  }
+  return '영상을 찾지 못했습니다. 링크나 검색어를 확인해주세요.';
 }
 
 /**
@@ -104,4 +142,4 @@ function spawnAudioStream(webpageUrl) {
   );
 }
 
-module.exports = { isYoutubeUrl, resolveTrack, spawnAudioStream };
+module.exports = { isYoutubeUrl, resolveTrack, spawnAudioStream, describeTrackError };

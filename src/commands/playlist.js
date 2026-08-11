@@ -8,7 +8,7 @@ const {
   removeTrackFromPlaylist,
   getPlaylistTracks,
 } = require('../db');
-const { resolveTrack } = require('../youtube');
+const { resolveTrack, describeTrackError } = require('../youtube');
 const { getPlayer } = require('../musicManager');
 
 module.exports = {
@@ -88,7 +88,7 @@ module.exports = {
         track = await resolveTrack(query);
       } catch (error) {
         console.error('[플레이리스트 추가] 검색 실패:', error);
-        return interaction.editReply('영상을 찾지 못했습니다. 링크나 검색어를 확인해주세요.');
+        return interaction.editReply(describeTrackError(error));
       }
       addTrackToPlaylist(playlist.id, track.title, track.url);
       return interaction.editReply(`➕ **${name}** 플레이리스트에 추가했습니다: **${track.title}**`);
