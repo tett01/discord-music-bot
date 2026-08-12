@@ -30,6 +30,26 @@ function isBenignStreamError(error) {
   return BENIGN_STREAM_ERRORS.has(error?.code);
 }
 
+/**
+ * 실제로 인코딩에 쓸 비트레이트(bps)를 정한다.
+ *
+ * 기본은 채널 설정 그대로다. `MAX_OPUS_BITRATE`(kbps)를 주면 그 값을 넘지 않게 깎는다.
+ * CPU가 빠듯한 호스팅에서 채널의 통화 품질은 그대로 두고 봇만 가볍게 돌리기 위한 것이다.
+ * 채널 비트레이트를 내리면 그 채널을 쓰는 사람들의 음성까지 같이 나빠진다.
+ *
+ * 잘못된 값(숫자가 아니거나 0 이하)은 무시하고 채널 값을 쓴다. 여기서 예외를 던지면
+ * 재생 자체가 막히는데, 설정 실수 때문에 봇이 안 도는 편이 더 나쁘다.
+ *
+ * @param {number} channelBitrate 음성 채널의 비트레이트(bps)
+ * @param {string | undefined} [maxKbps] MAX_OPUS_BITRATE 환경변수 값
+ * @returns {number} 적용할 비트레이트(bps)
+ */
+function effectiveBitrate(channelBitrate, maxKbps = process.env.MAX_OPUS_BITRATE) {
+  const limit = Number.parseInt(String(maxKbps ?? '').trim(), 10);
+  if (!Number.isFinite(limit) || limit <= 0) return channelBitrate;
+  return Math.min(channelBitrate, limit * 1000);
+}
+
 class GuildMusicPlayer {
   constructor(guildId, textChannel) {
     this.guildId = guildId;
@@ -298,10 +318,11 @@ class GuildMusicPlayer {
     });
     resource.volume.setVolume(this.volume / 100);
 
-    // 인코더 비트레이트를 채널 설정에 맞춘다. (prism은 16k~128k로 클램프)
+    // 인코더 비트레이트를 채널 설정(과 MAX_OPUS_BITRATE 상한)에 맞춘다.
+    // prism은 16k~128k로 클램프하므로 그 밖의 값은 어차피 그대로 반영되지 않는다.
     if (resource.encoder && this.voiceChannelBitrate) {
       try {
-        resource.encoder.setBitrate(this.voiceChannelBitrate);
+        resource.encoder.setBitrate(effectiveBitrate(this.voiceChannelBitrate));
       } catch (error) {
         console.error('[music] 비트레이트 설정 실패:', error);
       }
@@ -383,4 +404,11 @@ function destroyAllPlayers() {
 
 // isBenignStreamError는 내부용이지만, 여기에 없는 코드가 들어오면 정지·건너뛰기의
 // 정상 부산물이 사용자에게 오류로 보이므로 테스트할 수 있게 내보낸다.
-module.exports = { getPlayer, getExistingPlayer, destroyAllPlayers, LOOP_MODES, isBenignStreamError };
+module.exports = {
+  getPlayer,
+  getExistingPlayer,
+  destroyAllPlayers,
+  LOOP_MODES,
+  isBenignStreamError,
+  effectiveBitrate,
+};
