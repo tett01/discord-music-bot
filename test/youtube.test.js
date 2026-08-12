@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { describeTrackError, isYoutubeUrl, cookieArgs } = require('../src/youtube');
+const { describeTrackError, isYoutubeUrl, cookieArgs, resolveYtdlpPath } = require('../src/youtube');
 
 const DEFAULT_MESSAGE = '영상을 찾지 못했습니다. 링크나 검색어를 확인해주세요.';
 
@@ -112,6 +112,36 @@ test('YTDLP_COOKIES가 없으면 인자를 붙이지 않는다', (t) => {
 
   process.env.YTDLP_COOKIES = '   ';
   assert.deepEqual(cookieArgs(), []);
+});
+
+test('YTDLP_PATH를 지정하면 그 경로를 쓴다', (t) => {
+  // 이 우선순위가 뒤집히면 python이 없는 호스팅에서 직접 넣어준 바이너리를 무시하고
+  // 설치되지 않은 yt-dlp-exec 경로로 떨어진다.
+  const previous = process.env.YTDLP_PATH;
+  t.after(() => {
+    if (previous === undefined) delete process.env.YTDLP_PATH;
+    else process.env.YTDLP_PATH = previous;
+  });
+
+  process.env.YTDLP_PATH = '/home/container/bin/yt-dlp';
+  assert.equal(resolveYtdlpPath(), '/home/container/bin/yt-dlp');
+
+  // 공백만 있는 값은 미설정과 같게 본다.
+  process.env.YTDLP_PATH = '   ';
+  assert.notEqual(resolveYtdlpPath(), '   ');
+});
+
+test('YTDLP_PATH가 없어도 실행 가능한 경로를 돌려준다', (t) => {
+  const previous = process.env.YTDLP_PATH;
+  t.after(() => {
+    if (previous === undefined) delete process.env.YTDLP_PATH;
+    else process.env.YTDLP_PATH = previous;
+  });
+
+  delete process.env.YTDLP_PATH;
+  const resolved = resolveYtdlpPath();
+  assert.equal(typeof resolved, 'string');
+  assert.ok(resolved.length > 0, '빈 경로로 spawn하면 원인을 알기 어려운 오류가 난다');
 });
 
 test('쿠키 파일이 있으면 --cookies를 붙이고, 없으면 조용히 뺀다', (t) => {

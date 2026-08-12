@@ -1,13 +1,41 @@
 const { execFile, spawn } = require('node:child_process');
 const fs = require('node:fs');
+const path = require('node:path');
 
-// yt-dlp-exec의 index는 execa를 감싼 얇은 래퍼일 뿐이라 직접 실행하는 편이 의존성이 가볍다.
-// 바이너리 경로만 constants에서 가져오고, 실행은 child_process로 한다.
-let YTDLP_PATH;
-try {
-  YTDLP_PATH = require('yt-dlp-exec/src/constants').YOUTUBE_DL_PATH;
-} catch {
-  YTDLP_PATH = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+// scripts/ensure-ytdlp.js가 내려받는 위치. yt-dlp-exec를 설치하지 못한 환경(python이
+// 없는 호스팅 컨테이너 등)에서 쓰는 standalone 바이너리다.
+const BUNDLED_YTDLP = path.join(
+  __dirname,
+  '..',
+  'bin',
+  process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'
+);
+
+/**
+ * 실행할 yt-dlp 바이너리 경로를 정한다. 위에서부터 먼저 잡히는 것을 쓴다.
+ *
+ * 1. `YTDLP_PATH` — 직접 지정한 경로가 항상 이긴다
+ * 2. `bin/yt-dlp` — postinstall이 받아둔 standalone 바이너리
+ * 3. `yt-dlp-exec` — 설치에 성공했다면 그 패키지가 받아둔 바이너리
+ * 4. PATH의 `yt-dlp`
+ *
+ * yt-dlp-exec의 postinstall은 python을 요구하므로 python이 없는 컨테이너에서는
+ * 설치 자체가 실패한다. 그래서 이 패키지에만 의존하지 않는다.
+ *
+ * @returns {string}
+ */
+function resolveYtdlpPath() {
+  const override = (process.env.YTDLP_PATH || '').trim();
+  if (override) return override;
+
+  if (fs.existsSync(BUNDLED_YTDLP)) return BUNDLED_YTDLP;
+
+  try {
+    // yt-dlp-exec의 index는 execa를 감싼 얇은 래퍼일 뿐이라 경로만 가져다 쓴다.
+    return require('yt-dlp-exec/src/constants').YOUTUBE_DL_PATH;
+  } catch {
+    return process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+  }
 }
 
 const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\/.+$/i;
@@ -54,7 +82,7 @@ function isYoutubeUrl(text) {
 function runYtdlp(args) {
   return new Promise((resolve, reject) => {
     execFile(
-      YTDLP_PATH,
+      resolveYtdlpPath(),
       args,
       { maxBuffer: 32 * 1024 * 1024, timeout: 60_000, windowsHide: true },
       (error, stdout, stderr) => {
@@ -163,7 +191,7 @@ async function resolveTrack(query) {
  */
 function spawnAudioStream(webpageUrl) {
   return spawn(
-    YTDLP_PATH,
+    resolveYtdlpPath(),
     [
       webpageUrl,
       '-f',
@@ -181,4 +209,11 @@ function spawnAudioStream(webpageUrl) {
   );
 }
 
-module.exports = { isYoutubeUrl, resolveTrack, spawnAudioStream, describeTrackError, cookieArgs };
+module.exports = {
+  isYoutubeUrl,
+  resolveTrack,
+  spawnAudioStream,
+  describeTrackError,
+  cookieArgs,
+  resolveYtdlpPath,
+};
