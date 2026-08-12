@@ -1,6 +1,8 @@
 node_modules/
 .env
 data/
+# postinstall이 내려받는 yt-dlp 바이너리
+bin/
 *.sqlite
 *.sqlite3
 

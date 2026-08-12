@@ -10,17 +10,21 @@
     "start": "node src/index.js",
     "deploy": "node src/deploy-commands.js",
     "check": "node scripts/check-syntax.js",
-    "test": "node --test"
+    "test": "node --test",
+    "postinstall": "node scripts/ensure-ytdlp.js"
   },
   "dependencies": {
-    "@discordjs/opus": "^0.9.0",
     "@discordjs/voice": "^0.19.2",
     "@snazzah/davey": "^0.1.12",
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
     "ffmpeg-static": "^5.2.0",
     "libsodium-wrappers": "^0.7.15",
-    "prism-media": "^1.3.5",
+    "opusscript": "^0.0.8",
+    "prism-media": "^1.3.5"
+  },
+  "optionalDependencies": {
+    "@discordjs/opus": "^0.9.0",
     "yt-dlp-exec": "^1.0.2"
   },
   "engines": {
