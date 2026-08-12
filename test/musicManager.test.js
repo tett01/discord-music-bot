@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const {
   isBenignStreamError,
   LOOP_MODES,
+  effectiveBitrate,
   getPlayer,
   getExistingPlayer,
   destroyAllPlayers,
@@ -118,5 +119,31 @@ test('destroyAllPlayers가 남은 플레이어를 모두 정리한다', () => {
 
   for (const guildId of guilds) {
     assert.equal(getExistingPlayer(guildId), null);
+  }
+});
+
+test('MAX_OPUS_BITRATE가 없으면 채널 값을 그대로 쓴다', () => {
+  // 상한을 두지 않는 것이 기본이어야 한다. 기본값을 깎으면 아무 설정도 안 한
+  // 서버의 음질이 조용히 나빠진다.
+  for (const bitrate of [8_000, 64_000, 96_000, 384_000]) {
+    assert.equal(effectiveBitrate(bitrate, undefined), bitrate);
+  }
+});
+
+test('MAX_OPUS_BITRATE는 kbps 단위로 상한을 건다', () => {
+  assert.equal(effectiveBitrate(96_000, '64'), 64_000);
+  assert.equal(effectiveBitrate(384_000, '48'), 48_000);
+
+  // 채널이 이미 상한보다 낮으면 올리지 않는다. 상한이지 목표치가 아니다.
+  assert.equal(effectiveBitrate(32_000, '64'), 32_000);
+
+  // 경계값에서 깎이지 않아야 한다.
+  assert.equal(effectiveBitrate(64_000, '64'), 64_000);
+});
+
+test('잘못된 MAX_OPUS_BITRATE는 무시하고 채널 값을 쓴다', () => {
+  // 설정 실수로 재생이 막히는 것이 음질보다 나쁘다.
+  for (const bad of ['', '   ', 'abc', '0', '-10', null]) {
+    assert.equal(effectiveBitrate(96_000, bad), 96_000, `무시되지 않음: ${JSON.stringify(bad)}`);
   }
 });
