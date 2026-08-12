@@ -1,4 +1,5 @@
 const { execFile, spawn } = require('node:child_process');
+const fs = require('node:fs');
 
 // yt-dlp-exec의 index는 execa를 감싼 얇은 래퍼일 뿐이라 직접 실행하는 편이 의존성이 가볍다.
 // 바이너리 경로만 constants에서 가져오고, 실행은 child_process로 한다.
@@ -10,6 +11,36 @@ try {
 }
 
 const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\/.+$/i;
+
+// 같은 경고를 매 요청마다 찍지 않도록 이미 알린 경로를 기억한다.
+const warnedCookiePaths = new Set();
+
+/**
+ * yt-dlp에 붙일 쿠키 인자를 만든다.
+ *
+ * 클라우드/호스팅 IP는 유튜브가 "Sign in to confirm you're not a bot"으로 막는 일이
+ * 잦다. 이때 브라우저에서 뽑은 쿠키 파일을 물리면 통과한다. 로컬 실행에는 필요 없으므로
+ * `YTDLP_COOKIES`가 없으면 아무 인자도 붙이지 않는다. (기존 동작 그대로)
+ *
+ * 경로가 지정됐는데 파일이 없으면, `--cookies`를 그대로 넘겼을 때 yt-dlp가 알아보기
+ * 힘든 오류로 죽으므로 경고만 남기고 인자를 뺀다.
+ *
+ * @returns {string[]}
+ */
+function cookieArgs() {
+  const cookiePath = (process.env.YTDLP_COOKIES || '').trim();
+  if (!cookiePath) return [];
+
+  if (!fs.existsSync(cookiePath)) {
+    if (!warnedCookiePaths.has(cookiePath)) {
+      warnedCookiePaths.add(cookiePath);
+      console.warn(`YTDLP_COOKIES에 지정된 쿠키 파일을 찾을 수 없습니다: ${cookiePath}`);
+    }
+    return [];
+  }
+
+  return ['--cookies', cookiePath];
+}
 
 function isYoutubeUrl(text) {
   return YOUTUBE_URL_REGEX.test(text.trim());
@@ -46,6 +77,11 @@ function runYtdlp(args) {
 // yt-dlp가 stderr로 남기는 대표적인 실패 사유를 사용자에게 보여줄 문장으로 옮긴다.
 // 순서가 중요하다. 위쪽일수록 구체적인 사유이므로 먼저 검사한다.
 const ERROR_HINTS = [
+  // 호스팅 IP가 봇으로 의심받는 경우. 영상 문제가 아니므로 다른 사유보다 먼저 본다.
+  [
+    /not a bot|cookies for the authentication|--cookies-from-browser/i,
+    '🤖 유튜브가 이 서버를 봇으로 의심해 차단했습니다. 쿠키 파일(YTDLP_COOKIES) 설정이 필요합니다.',
+  ],
   [/confirm your age|age.restricted/i, '🔞 연령 제한이 걸린 영상이라 재생할 수 없습니다.'],
   [/members.only|join this channel/i, '💳 멤버십 전용 영상이라 재생할 수 없습니다.'],
   [/private video/i, '🔒 비공개 영상입니다.'],
@@ -92,6 +128,7 @@ async function resolveTrack(query) {
     '--no-playlist',
     '-f',
     'bestaudio/best',
+    ...cookieArgs(),
   ]);
 
   let info;
@@ -137,9 +174,11 @@ function spawnAudioStream(webpageUrl) {
       '--no-warnings',
       '--quiet',
       '--no-check-certificates',
+      // 조회가 쿠키로 통과했어도 스트림 요청에 쿠키가 없으면 여기서 다시 막힌다.
+      ...cookieArgs(),
     ],
     { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }
   );
 }
 
-module.exports = { isYoutubeUrl, resolveTrack, spawnAudioStream, describeTrackError };
+module.exports = { isYoutubeUrl, resolveTrack, spawnAudioStream, describeTrackError, cookieArgs };

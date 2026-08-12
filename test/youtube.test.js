@@ -1,7 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { describeTrackError, isYoutubeUrl } = require('../src/youtube');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const { describeTrackError, isYoutubeUrl, cookieArgs } = require('../src/youtube');
 
 const DEFAULT_MESSAGE = '영상을 찾지 못했습니다. 링크나 검색어를 확인해주세요.';
 
@@ -15,6 +19,11 @@ const SAMPLES = [
   ['삭제된 영상', 'ERROR: [youtube] abc: Video unavailable. This video has been removed by the uploader', '🗑️'],
   ['타임아웃', 'yt-dlp 응답 시간 초과', '⌛'],
   ['추출 실패', 'ERROR: unable to extract player response; please report this issue', '⚠️'],
+  [
+    '봇 의심 차단',
+    "ERROR: [youtube] abc: Sign in to confirm you're not a bot. Use --cookies-from-browser or --cookies for the authentication.",
+    '🤖',
+  ],
 ];
 
 test('실패 사유별로 다른 안내 문장을 돌려준다', () => {
@@ -41,6 +50,10 @@ test('구체적인 패턴이 넓은 패턴보다 먼저 매칭된다', () => {
 
   const bothMembersAndPrivate = new Error('ERROR: Join this channel. Private video');
   assert.ok(describeTrackError(bothMembersAndPrivate).startsWith('💳'));
+
+  // 봇 차단은 영상이 아니라 서버 IP 문제라, 같이 걸려도 이쪽 안내가 나가야 한다.
+  const botAndUnavailable = new Error("ERROR: Sign in to confirm you're not a bot. Video unavailable");
+  assert.ok(describeTrackError(botAndUnavailable).startsWith('🤖'));
 });
 
 test('알 수 없는 오류는 기본 문구로 떨어진다', () => {
@@ -84,4 +97,39 @@ test('유튜브가 아닌 입력은 검색어로 취급한다', () => {
   for (const text of notUrls) {
     assert.ok(!isYoutubeUrl(text), `유튜브 URL로 잘못 인식함: ${text}`);
   }
+});
+
+test('YTDLP_COOKIES가 없으면 인자를 붙이지 않는다', (t) => {
+  // 로컬 실행에서 동작이 달라지면 안 된다. 빈 문자열도 미설정과 같게 취급한다.
+  const previous = process.env.YTDLP_COOKIES;
+  t.after(() => {
+    if (previous === undefined) delete process.env.YTDLP_COOKIES;
+    else process.env.YTDLP_COOKIES = previous;
+  });
+
+  delete process.env.YTDLP_COOKIES;
+  assert.deepEqual(cookieArgs(), []);
+
+  process.env.YTDLP_COOKIES = '   ';
+  assert.deepEqual(cookieArgs(), []);
+});
+
+test('쿠키 파일이 있으면 --cookies를 붙이고, 없으면 조용히 뺀다', (t) => {
+  const previous = process.env.YTDLP_COOKIES;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytdlp-cookies-'));
+  const cookiePath = path.join(dir, 'cookies.txt');
+  fs.writeFileSync(cookiePath, '# Netscape HTTP Cookie File\n');
+
+  t.after(() => {
+    if (previous === undefined) delete process.env.YTDLP_COOKIES;
+    else process.env.YTDLP_COOKIES = previous;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  process.env.YTDLP_COOKIES = cookiePath;
+  assert.deepEqual(cookieArgs(), ['--cookies', cookiePath]);
+
+  // 경로가 틀렸을 때 --cookies를 그대로 넘기면 yt-dlp가 알아보기 힘든 오류로 죽는다.
+  process.env.YTDLP_COOKIES = path.join(dir, '없는파일.txt');
+  assert.deepEqual(cookieArgs(), []);
 });
