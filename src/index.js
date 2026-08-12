@@ -1,5 +1,7 @@
 // pm2 등으로 실행할 때 작업 디렉토리가 달라져도 .env를 찾도록 절대경로로 지정한다.
 require('dotenv').config({ path: require('node:path').join(__dirname, '..', '.env') });
+// db.js가 node:sqlite를 require하기 전에 본다. 순서를 바꾸면 알아보기 힘든 오류로 죽는다.
+require('./nodeVersion').assertNodeVersion();
 const { Client, GatewayIntentBits, Events, MessageFlags } = require('discord.js');
 const { loadCommands } = require('./loadCommands');
 const { getGuildSettings } = require('./db');
