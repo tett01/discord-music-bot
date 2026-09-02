@@ -36,6 +36,10 @@ function assetName() {
  * @returns {string | null} 건너뛰는 이유. 받아야 하면 null
  */
 function skipReason() {
+  // play-dl만 쓰기로 한 배포(무료 호스팅 등)에서는 40MB짜리 바이너리를 받을 이유가 없다.
+  // 디스크와 빌드 시간을 아끼려면 SKIP_YTDLP_DOWNLOAD=1을 준다.
+  if (String(process.env.SKIP_YTDLP_DOWNLOAD || '').trim() === '1') return 'SKIP_YTDLP_DOWNLOAD=1';
+  if ((process.env.AUDIO_ENGINE || '').trim().toLowerCase() === 'playdl') return 'AUDIO_ENGINE=playdl';
   if ((process.env.YTDLP_PATH || '').trim()) return 'YTDLP_PATH가 지정되어 있습니다';
   if (fs.existsSync(TARGET)) return `이미 있습니다: ${TARGET}`;
 

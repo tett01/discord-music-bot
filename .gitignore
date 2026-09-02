@@ -1,9 +1,13 @@
 node_modules/
-.env
-data/
-# postinstall이 내려받는 yt-dlp 바이너리
-bin/
-*.sqlite
-*.sqlite3
+.DS_Store
 
-.claude/
+# 토큰이 들어 있다. 절대 올리지 말 것. (Render는 대시보드 환경변수를 쓴다)
+.env
+env
+
+# SQLite 본체와 WAL 부산물. data/bot.sqlite는 저장소에 없는 유일한 사본이다.
+data/
+# postinstall이 받는 yt-dlp 바이너리(약 40MB)
+bin/
+# play-dl이 쿠키·토큰을 저장하는 곳. 로그인 세션이므로 올리면 안 된다.
+.data/

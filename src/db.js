@@ -18,6 +18,16 @@ if (dbPath !== ':memory:') {
 // 명시적으로 넣는다. 그래야 기존 DB에 새로 들어온 서버도 같은 기본값을 받는다.
 const DEFAULT_VOLUME = 15;
 
+// 오디오 전달 방식.
+//
+// - normal   : 디코딩 → PCM → 재인코딩. 음량 조절과 비트레이트 제한이 가능하다.
+// - original : 유튜브 Opus를 재인코딩 없이 그대로 흘려보낸다. 음질 손실과 CPU 사용이
+//              줄어드는 대신 PCM을 거치지 않으므로 음량 조절이 불가능하다.
+//
+// /음질 명령어의 선택지가 이 목록에 묶여 있다. 값을 늘리면 quality.js도 같이 고쳐야 한다.
+const AUDIO_QUALITY_MODES = ['normal', 'original'];
+const DEFAULT_AUDIO_QUALITY = 'normal';
+
 const db = new DatabaseSync(dbPath);
 // 메모리 DB에는 저널 파일이 없으므로 WAL을 적용하지 않는다.
 if (dbPath !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
@@ -27,7 +37,8 @@ CREATE TABLE IF NOT EXISTS guild_settings (
   guild_id TEXT PRIMARY KEY,
   text_channel_id TEXT,
   volume INTEGER NOT NULL DEFAULT ${DEFAULT_VOLUME},
-  loop_mode TEXT NOT NULL DEFAULT 'off'
+  loop_mode TEXT NOT NULL DEFAULT 'off',
+  audio_quality TEXT NOT NULL DEFAULT '${DEFAULT_AUDIO_QUALITY}'
 );
 
 CREATE TABLE IF NOT EXISTS playlists (
@@ -47,10 +58,29 @@ CREATE TABLE IF NOT EXISTS playlist_tracks (
 );
 `);
 
+/**
+ * 테이블에 칼럼이 없으면 추가한다.
+ *
+ * `CREATE TABLE IF NOT EXISTS`는 이미 있는 테이블을 건드리지 않으므로, DDL에 칼럼을
+ * 늘려도 **기존 DB에는 반영되지 않는다.** data/bot.sqlite는 저장소에 없는 유일한 사본이라
+ * 지우고 다시 만들 수도 없다. 그래서 새 칼럼은 여기서 따로 붙인다.
+ *
+ * NOT NULL 칼럼은 DEFAULT가 있어야 ALTER TABLE로 추가할 수 있다.
+ */
+function ensureColumn(table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (columns.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+ensureColumn('guild_settings', 'audio_quality', `TEXT NOT NULL DEFAULT '${DEFAULT_AUDIO_QUALITY}'`);
+
 function getGuildSettings(guildId) {
   let row = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guildId);
   if (!row) {
-    db.prepare('INSERT INTO guild_settings (guild_id, volume) VALUES (?, ?)').run(guildId, DEFAULT_VOLUME);
+    db.prepare(
+      'INSERT INTO guild_settings (guild_id, volume, audio_quality) VALUES (?, ?, ?)'
+    ).run(guildId, DEFAULT_VOLUME, DEFAULT_AUDIO_QUALITY);
     row = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guildId);
   }
   return row;
@@ -75,6 +105,14 @@ function setVolume(guildId, volume) {
 function setLoopMode(guildId, mode) {
   getGuildSettings(guildId);
   db.prepare('UPDATE guild_settings SET loop_mode = ? WHERE guild_id = ?').run(mode, guildId);
+}
+
+function setAudioQuality(guildId, quality) {
+  if (!AUDIO_QUALITY_MODES.includes(quality)) {
+    throw new Error(`알 수 없는 음질 모드: ${quality}`);
+  }
+  getGuildSettings(guildId);
+  db.prepare('UPDATE guild_settings SET audio_quality = ? WHERE guild_id = ?').run(quality, guildId);
 }
 
 function createPlaylist(guildId, name) {
@@ -141,8 +179,11 @@ module.exports = {
   setTextChannel,
   clearTextChannel,
   DEFAULT_VOLUME,
+  AUDIO_QUALITY_MODES,
+  DEFAULT_AUDIO_QUALITY,
   setVolume,
   setLoopMode,
+  setAudioQuality,
   createPlaylist,
   getPlaylist,
   listPlaylists,
