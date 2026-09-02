@@ -107,8 +107,8 @@ function runYtdlp(args) {
 const ERROR_HINTS = [
   // 호스팅 IP가 봇으로 의심받는 경우. 영상 문제가 아니므로 다른 사유보다 먼저 본다.
   [
-    /not a bot|cookies for the authentication|--cookies-from-browser/i,
-    '🤖 유튜브가 이 서버를 봇으로 의심해 차단했습니다. 쿠키 파일(YTDLP_COOKIES) 설정이 필요합니다.',
+    /not a bot|cookies for the authentication|--cookies-from-browser|login required|LOGIN_REQUIRED|consent\.youtube/i,
+    '🤖 유튜브가 이 서버를 봇으로 의심해 차단했습니다. 쿠키 설정이 필요합니다. (YOUTUBE_COOKIE / YTDLP_COOKIES)',
   ],
   [/confirm your age|age.restricted/i, '🔞 연령 제한이 걸린 영상이라 재생할 수 없습니다.'],
   [/members.only|join this channel/i, '💳 멤버십 전용 영상이라 재생할 수 없습니다.'],
@@ -118,8 +118,10 @@ const ERROR_HINTS = [
   [/video unavailable|has been removed|no longer available|does not exist/i, '🗑️ 삭제되었거나 이용할 수 없는 영상입니다.'],
   [/시간 초과|timed out|ETIMEDOUT/i, '⌛ 유튜브 응답이 너무 느립니다. 잠시 후 다시 시도해주세요.'],
   [
-    /HTTP Error 4\d\d|failed to extract|unable to extract|nsig extraction/i,
-    '⚠️ 유튜브에서 영상 정보를 가져오지 못했습니다. yt-dlp가 오래되었을 수 있습니다. (README의 문제 해결 참고)',
+    // 뒤쪽 세 패턴은 play-dl이 유튜브 응답을 파싱하지 못했을 때 내는 문구다.
+    // 두 엔진의 '추출 실패'는 사용자 입장에서 같은 상황이라 한 문장으로 묶는다.
+    /HTTP Error 4\d\d|failed to extract|unable to extract|nsig extraction|While getting info from url|Got error while parsing|Could not extract functions/i,
+    '⚠️ 유튜브에서 영상 정보를 가져오지 못했습니다. 소스 엔진이 오래되었을 수 있습니다. (README의 문제 해결 참고)',
   ],
 ];
 
@@ -186,16 +188,22 @@ async function resolveTrack(query) {
  * (URL이 yt-dlp가 사용한 클라이언트/헤더에 묶여 있어 ffmpeg의 요청은 거부된다)
  * yt-dlp가 직접 받아서 파이프로 넘기면 이 문제가 없다.
  *
+ * `opusOnly`는 원음(재인코딩 없는 전달) 모드용이다. 디스코드가 요구하는 것이 48kHz
+ * 스테레오 Opus이므로, 소스가 Opus일 때만 재인코딩을 건너뛸 수 있다. AAC(m4a)가 잡히면
+ * 그대로 넘길 수 없으므로 **일부러 대체 포맷을 두지 않는다** — 여기서 실패하게 두고
+ * 호출한 쪽이 일반 모드로 되돌리는 편이, 엉뚱한 코덱을 물고 조용히 깨지는 것보다 낫다.
+ *
  * @param {string} webpageUrl
+ * @param {{ opusOnly?: boolean }} [options]
  * @returns {import('node:child_process').ChildProcessWithoutNullStreams}
  */
-function spawnAudioStream(webpageUrl) {
+function spawnAudioStream(webpageUrl, { opusOnly = false } = {}) {
   return spawn(
     resolveYtdlpPath(),
     [
       webpageUrl,
       '-f',
-      'bestaudio/best',
+      opusOnly ? 'bestaudio[acodec=opus]' : 'bestaudio/best',
       '-o',
       '-',
       '--no-playlist',

@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { getPlayer } = require('../musicManager');
-const { resolveTrack, describeTrackError } = require('../youtube');
+const { resolveTrack, describeTrackError } = require('../source');
 const { getCachedChart, refreshMelonChart, CHART_SIZE } = require('../melon');
 
 module.exports = {

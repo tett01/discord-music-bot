@@ -8,7 +8,7 @@ const {
   removeTrackFromPlaylist,
   getPlaylistTracks,
 } = require('../db');
-const { resolveTrack, describeTrackError } = require('../youtube');
+const { resolveTrack, describeTrackError } = require('../source');
 const { getPlayer } = require('../musicManager');
 
 module.exports = {

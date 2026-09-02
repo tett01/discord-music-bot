@@ -7,12 +7,14 @@ const assert = require('node:assert/strict');
 const {
   isBenignStreamError,
   LOOP_MODES,
+  AUDIO_QUALITY_MODES,
   effectiveBitrate,
+  ffmpegArgs,
   getPlayer,
   getExistingPlayer,
   destroyAllPlayers,
 } = require('../src/musicManager');
-const { getGuildSettings, setLoopMode } = require('../src/db');
+const { getGuildSettings, setLoopMode, setAudioQuality } = require('../src/db');
 
 let counter = 0;
 const nextGuild = () => `guild-${++counter}`;
@@ -51,6 +53,44 @@ test('/반복 선택지가 LOOP_MODES와 정확히 일치한다', () => {
   assert.deepEqual(choices, LOOP_MODES);
 });
 
+test('음질 모드는 normal/original 두 가지다', () => {
+  // /음질 명령어의 선택지와 DB의 audio_quality 값이 여기에 묶여 있다.
+  assert.deepEqual(AUDIO_QUALITY_MODES, ['normal', 'original']);
+});
+
+test('/음질 선택지가 AUDIO_QUALITY_MODES와 정확히 일치한다', () => {
+  // 선택지만 늘리면 setAudioQuality가 예외를 던지고, 빠뜨리면 고를 수 없다.
+  const qualityCommand = require('../src/commands/quality');
+  const choices = qualityCommand.data.toJSON().options[0].choices.map((c) => c.value);
+  assert.deepEqual(choices, AUDIO_QUALITY_MODES);
+});
+
+test('일반 모드 ffmpeg는 48kHz 스테레오 PCM을 낸다', () => {
+  // @discordjs/voice가 여기에 음량을 곱하고 다시 인코딩한다. 셋 중 하나라도 어긋나면
+  // 재생 속도나 음정이 틀어진다.
+  const args = ffmpegArgs(false);
+  assert.deepEqual(args.slice(-6), ['-f', 's16le', '-ar', '48000', '-ac', '2']);
+  assert.ok(!args.includes('copy'), '일반 모드는 디코딩해야 한다');
+});
+
+test('원음 모드 ffmpeg는 재인코딩 없이 Ogg Opus로 리먹싱만 한다', () => {
+  // -c:a copy가 빠지면 재인코딩이 되살아나 원음 모드의 의미가 사라지고,
+  // -f opus가 아니면 StreamType.OggOpus로 넘긴 스트림을 디먹싱하지 못한다.
+  const args = ffmpegArgs(true);
+  assert.deepEqual(args.slice(-4), ['-c:a', 'copy', '-f', 'opus']);
+  assert.ok(!args.includes('s16le'), '원음 모드는 PCM으로 디코딩하면 안 된다');
+});
+
+test('두 모드 모두 파이프 입력에서 영상 트랙을 버린다', () => {
+  for (const passthrough of [false, true]) {
+    const args = ffmpegArgs(passthrough);
+    // 입력 옵션이 -i 뒤로 가면 ffmpeg가 무시한다.
+    assert.ok(args.indexOf('-analyzeduration') < args.indexOf('-i'));
+    assert.ok(args.includes('pipe:0'));
+    assert.ok(args.includes('-vn'));
+  }
+});
+
 // 아래는 음성 연결 없이 확인할 수 있는 부분만 본다. 재생을 시작하면 yt-dlp를
 // 띄우므로 enqueue는 건드리지 않는다.
 
@@ -75,6 +115,33 @@ test('플레이어는 DB에 저장된 음량·반복 모드로 복원된다', ()
   const player = getPlayer(guildId);
   assert.equal(player.loopMode, 'queue');
   assert.equal(player.volume, getGuildSettings(guildId).volume);
+
+  player.destroy();
+});
+
+test('플레이어는 DB에 저장된 음질 모드로 복원된다', () => {
+  const guildId = nextGuild();
+  setAudioQuality(guildId, 'original');
+
+  const player = getPlayer(guildId);
+  // 여기서 되돌아가면 재시작할 때마다 원음 설정이 풀린다.
+  assert.equal(player.audioQuality, 'original');
+
+  player.destroy();
+});
+
+test('setAudioQuality는 메모리와 DB 양쪽에 쓴다', () => {
+  const guildId = nextGuild();
+  const player = getPlayer(guildId);
+
+  // 새 서버는 일반 모드로 시작한다. 원음은 음량 조절을 포기하는 선택이라 기본값이 될 수 없다.
+  assert.equal(player.audioQuality, 'normal');
+
+  player.setAudioQuality('original');
+  assert.equal(player.audioQuality, 'original');
+  assert.equal(getGuildSettings(guildId).audio_quality, 'original');
+
+  assert.throws(() => player.setAudioQuality('무손실'), /알 수 없는 음질 모드/);
 
   player.destroy();
 });

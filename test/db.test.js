@@ -10,8 +10,11 @@ const {
   getGuildSettings,
   setTextChannel,
   clearTextChannel,
+  AUDIO_QUALITY_MODES,
+  DEFAULT_AUDIO_QUALITY,
   setVolume,
   setLoopMode,
+  setAudioQuality,
   createPlaylist,
   getPlaylist,
   listPlaylists,
@@ -40,6 +43,27 @@ test('길드 설정은 기본값으로 생성된다', () => {
   assert.equal(settings.volume, DEFAULT_VOLUME);
   assert.equal(settings.loop_mode, 'off');
   assert.equal(settings.text_channel_id, null);
+  assert.equal(settings.audio_quality, DEFAULT_AUDIO_QUALITY);
+});
+
+test('기본 음질 모드는 일반이다', () => {
+  // 원음은 음량 조절을 포기하는 선택이라 기본값이 될 수 없다. 새 서버가 조용히
+  // /음량이 안 듣는 상태로 시작하면 고장으로 오해한다.
+  assert.equal(DEFAULT_AUDIO_QUALITY, 'normal');
+  assert.equal(getGuildSettings(nextGuild()).audio_quality, 'normal');
+});
+
+test('setAudioQuality는 아는 모드만 받는다', () => {
+  const guildId = nextGuild();
+
+  for (const mode of AUDIO_QUALITY_MODES) {
+    setAudioQuality(guildId, mode);
+    assert.equal(getGuildSettings(guildId).audio_quality, mode);
+  }
+
+  // 검증이 없으면 DB에 들어간 쓰레기 값이 다음 재생 때 터진다.
+  assert.throws(() => setAudioQuality(guildId, 'flac'), /알 수 없는 음질 모드/);
+  assert.equal(getGuildSettings(guildId).audio_quality, 'original', '실패한 쓰기가 남으면 안 된다');
 });
 
 test('기본 음량은 15다', () => {
