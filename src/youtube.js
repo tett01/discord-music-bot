@@ -70,6 +70,86 @@ function cookieArgs() {
   return ['--cookies', cookiePath];
 }
 
+let warnedExtraArgs = false;
+
+/**
+ * 따옴표를 존중하며 명령줄 문자열을 인자 배열로 쪼갠다.
+ *
+ * 셸을 거치지 않고 spawn에 직접 넘기므로 우리가 직접 잘라야 한다. 셸을 흉내 내려는
+ * 것이 아니라 `--extractor-args "youtube:player_client=tv"`처럼 **따옴표로 묶인 값 하나**를
+ * 붙여넣는 흔한 경우를 살리는 것이 목적이다.
+ *
+ * @param {string} input
+ * @returns {string[]}
+ */
+function splitArgs(input) {
+  const tokens = [];
+  let current = '';
+  let quote = null;
+  let started = false;
+
+  for (const char of input) {
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      // 따옴표만으로 이루어진 빈 인자도 인자로 친다.
+      started = true;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (started) tokens.push(current);
+      current = '';
+      started = false;
+      continue;
+    }
+
+    current += char;
+    started = true;
+  }
+
+  if (started) tokens.push(current);
+  return tokens;
+}
+
+/**
+ * yt-dlp에 덧붙일 추가 인자를 만든다.
+ *
+ * 유튜브의 봇 판정은 **쿠키 말고 클라이언트를 바꾸는 것만으로 비껴가는 경우가 있다.**
+ * 계정을 걸지 않아도 되는 길이라 먼저 시도해볼 값이 있는데, 그때마다 코드를 고치게
+ * 두지 않으려고 환경변수로 열어둔다.
+ *
+ * - `YTDLP_PLAYER_CLIENT` — 흔히 쓰는 경우를 위한 지름길. `tv,web_safari`처럼 적으면
+ *   `--extractor-args youtube:player_client=tv,web_safari`가 된다.
+ * - `YTDLP_EXTRA_ARGS` — 그 밖의 무엇이든. 문자열을 그대로 잘라 붙인다.
+ *
+ * 둘 다 있으면 순서대로 모두 붙는다. 잘못된 값을 넣으면 yt-dlp가 거부하므로,
+ * 무엇이 붙었는지 한 번은 로그에 남겨 원인을 찾을 수 있게 한다.
+ *
+ * @returns {string[]}
+ */
+function extraArgs() {
+  const args = [];
+
+  const playerClient = (process.env.YTDLP_PLAYER_CLIENT || '').trim();
+  if (playerClient) args.push('--extractor-args', `youtube:player_client=${playerClient}`);
+
+  const extra = (process.env.YTDLP_EXTRA_ARGS || '').trim();
+  if (extra) args.push(...splitArgs(extra));
+
+  if (args.length && !warnedExtraArgs) {
+    warnedExtraArgs = true;
+    console.log(`[yt-dlp] 추가 인자를 사용합니다: ${args.join(' ')}`);
+  }
+
+  return args;
+}
+
 function isYoutubeUrl(text) {
   return YOUTUBE_URL_REGEX.test(text.trim());
 }
@@ -159,6 +239,7 @@ async function resolveTrack(query) {
     '-f',
     'bestaudio/best',
     ...cookieArgs(),
+    ...extraArgs(),
   ]);
 
   let info;
@@ -212,6 +293,9 @@ function spawnAudioStream(webpageUrl, { opusOnly = false } = {}) {
       '--no-check-certificates',
       // 조회가 쿠키로 통과했어도 스트림 요청에 쿠키가 없으면 여기서 다시 막힌다.
       ...cookieArgs(),
+      // 조회를 통과시킨 클라이언트로 스트림도 열어야 한다. 한쪽에만 붙이면
+      // 검색은 되는데 재생만 막히는, 원인을 찾기 어려운 상태가 된다.
+      ...extraArgs(),
     ],
     { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }
   );
@@ -223,5 +307,7 @@ module.exports = {
   spawnAudioStream,
   describeTrackError,
   cookieArgs,
+  extraArgs,
+  splitArgs,
   resolveYtdlpPath,
 };

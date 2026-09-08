@@ -156,6 +156,8 @@ yt-dlp (spawn) → stdout ─────────────────→
 
 **yt-dlp가 뽑은 스트림 URL을 ffmpeg가 직접 열게 바꾸지 마세요.** 그 URL은 yt-dlp가 쓴 클라이언트/헤더에 묶여 있어 ffmpeg의 요청은 403 Forbidden으로 거부됩니다. yt-dlp가 직접 받아 파이프로 넘기는 현재 구조가 이 문제를 피하는 방식입니다.
 
+**yt-dlp 인자를 늘릴 때는 `resolveTrack`과 `spawnAudioStream` 양쪽에 넣으세요.** 조회에만 붙이면 **검색은 되는데 재생만 막히는** 상태가 됩니다. `cookieArgs()`와 `extraArgs()`가 두 곳에 나란히 들어가 있는 것이 그래서입니다. `extraArgs()`는 `YTDLP_PLAYER_CLIENT`(지름길)와 `YTDLP_EXTRA_ARGS`(무엇이든)를 읽는데, 유튜브 봇 판정을 **쿠키 없이** 비껴가려는 시도를 코드 수정 없이 해보기 위한 구멍입니다.
+
 yt-dlp 바이너리는 `yt-dlp-exec/src/constants`에서 경로만 가져오고 실행은 `node:child_process`로 직접 합니다([youtube.js](src/youtube.js)). 패키지의 execa 래퍼는 쓰지 않습니다.
 
 **`resolveTrack()`의 실패를 사용자에게 보여줄 때는 반드시 `describeTrackError(error)`를 거치세요.** 연령·지역·멤버십 제한, 라이브, 삭제, 타임아웃은 봇 고장이 아니라 정상적인 제약이며, 이 함수가 yt-dlp stderr와 play-dl 예외 문구를 사유별 문장으로 옮깁니다. **두 엔진의 오류 문구가 `youtube.js`의 `ERROR_HINTS` 한 표에 같이 들어 있습니다** — play-dl 쪽 문구를 추가할 때도 여기에 넣으세요. 원본 에러 메시지를 그대로 노출하거나 "영상을 찾지 못했습니다"로 뭉뚱그리지 마세요. 새 사유를 추가하려면 `ERROR_HINTS` 배열에 넣으며, **구체적인 패턴일수록 앞에** 둬야 합니다(위에서부터 첫 일치를 씁니다).

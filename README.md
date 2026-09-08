@@ -223,6 +223,40 @@ Sign in to confirm you're not a bot
 
 봇은 이 경우 `🤖 유튜브가 이 서버를 봇으로 의심해 차단했습니다...`라고 알려 줍니다. 해결은 **로그인된 사용자의 쿠키를 붙이는 것**입니다. 유튜브 입장에서 익명 서버가 아니라 로그인한 사람으로 보이게 됩니다.
 
+#### 쿠키 없이 먼저 시도해보기
+
+봇 판정은 **클라이언트를 바꾸는 것만으로 비껴가는 경우가 있습니다.** 계정을 걸지 않아도 되므로 쿠키보다 먼저 시도해볼 값이 있습니다. 되면 5분, 안 되면 5분 버리는 것이라 손해가 적습니다.
+
+```
+YTDLP_PLAYER_CLIENT=android_vr,tv_embedded
+```
+
+yt-dlp에 `--extractor-args youtube:player_client=android_vr,tv_embedded`로 전달됩니다. 쉼표로 여러 개를 적으면 앞에서부터 시도합니다.
+
+**한 조합이 막히면 다른 조합으로 바꿔가며 시도해보세요.** 유튜브 쪽 사정으로 자주 바뀝니다. 참고로 2026년 9월 기준 차단되지 않은 IP에서 확인한 결과는 이렇습니다.
+
+| 값 | 결과 |
+| --- | --- |
+| `android_vr`, `tv_embedded` | 정상 |
+| `tv` | `The page needs to be reloaded` |
+| `web_safari`, `ios`, `mweb` | 포맷을 받지 못함 (PO Token 필요) |
+
+**IP에 따라 결과가 다릅니다.** 위 표는 출발점일 뿐이니, 막힌 호스트에서는 직접 바꿔가며 확인하세요.
+
+그 밖의 인자가 필요하면 `YTDLP_EXTRA_ARGS`에 그대로 적습니다. 따옴표로 묶인 값도 인식합니다.
+
+```
+YTDLP_EXTRA_ARGS=--extractor-args "youtube:player_client=tv" --sleep-requests 1
+```
+
+둘 다 지정하면 순서대로 모두 붙습니다. 적용되면 부팅 후 첫 검색 때 로그에 한 번 찍힙니다.
+
+```
+[yt-dlp] 추가 인자를 사용합니다: --extractor-args youtube:player_client=tv,web_safari
+```
+
+> 이 방법으로 통과하지 못하면 아래 쿠키로 넘어가세요. **`--extractor-args`는 play-dl 쪽에는 적용되지 않습니다** — yt-dlp가 실제 재생을 담당하므로 실용상 문제는 없습니다.
+
 #### 쿠키 뽑기
 
 > ⚠️ **주 계정을 쓰지 마세요.** 쿠키는 그 계정의 로그인 세션 자체입니다. 유출되면 비밀번호 없이도 계정에 접근할 수 있고, 유튜브가 자동화로 판단하면 그 계정이 제재를 받을 수 있습니다. **봇 전용으로 만든 부계정**으로만 하세요.
