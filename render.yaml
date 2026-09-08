@@ -9,7 +9,7 @@ services:
     runtime: node
     plan: free
     region: singapore
-    # Node 내장 SQLite(node:sqlite)를 쓰므로 23.4 미만에서는 뜨지 않는다.
+    # Node 23.4 미만이면 node:sqlite가 없어 JSON 파일 저장소로 떨어진다. 24를 지정해 SQLite를 쓴다.
     buildCommand: npm install --omit=optional
     startCommand: npm start
     healthCheckPath: /health
