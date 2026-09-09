@@ -433,6 +433,9 @@ class GuildMusicPlayer {
 
       const detail = stderr.trim().split('\n').slice(-2).join(' ');
       console.error(`[music] guild ${this.guildId} yt-dlp 종료 code=${code} ${detail}`);
+      // 실행한 명령을 같이 남긴다. 같은 호스트에서 손으로 돌리면 되는데 봇에서만
+      // 실패하는 일이 있어서, 무엇이 달랐는지는 인자를 봐야 알 수 있다.
+      console.error(`[music] guild ${this.guildId} 실행한 명령: ${child.spawnargs.join(' ')}`);
 
       if (passthrough && !receivedAudio() && this.source === handle) {
         console.warn(`[music] guild ${this.guildId} 원음 소스 없음, 일반 모드로 재시도: ${track.title}`);
