@@ -1,4 +1,4 @@
-const { execFile, spawn } = require('node:child_process');
+const { execFile, execFileSync, spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -68,6 +68,63 @@ function cookieArgs() {
   }
 
   return ['--cookies', cookiePath];
+}
+
+let jsRuntimeCache = null;
+
+/**
+ * yt-dlp에 JavaScript 런타임을 물려준다.
+ *
+ * 유튜브는 재생 URL의 `n` 파라미터를 JS로 풀어야 온전한 포맷을 준다. 런타임이 없으면
+ * yt-dlp가 그 단계를 건너뛰고 다른 클라이언트로 우회하는데, **그렇게 얻은 URL은
+ * IP에 묶여 있어 데이터센터에서 403으로 거부되는 일이 잦다.** yt-dlp 자신도 이 경로를
+ * deprecated로 표시하고 경고를 낸다.
+ *
+ * 기본 런타임은 deno뿐이라 대부분의 호스트에는 없다. 그런데 **우리는 Node 위에서 돌고
+ * 있으므로 쓸 수 있는 런타임이 이미 손에 있다.** `process.execPath`를 그대로 물려주면
+ * 새로 설치할 것이 없다.
+ *
+ * `--js-runtimes`는 비교적 최근에 생긴 옵션이라, 낡은 바이너리에 넘기면 "unknown option"으로
+ * **재생이 통째로 죽는다.** 그래서 지원 여부를 한 번 확인하고 캐시한다.
+ *
+ * `YTDLP_JS_RUNTIME=off`로 끌 수 있다.
+ *
+ * @returns {string[]}
+ */
+function jsRuntimeArgs() {
+  if (jsRuntimeCache) return jsRuntimeCache;
+
+  const setting = (process.env.YTDLP_JS_RUNTIME || '').trim();
+  if (setting.toLowerCase() === 'off') {
+    jsRuntimeCache = [];
+    return jsRuntimeCache;
+  }
+
+  let supported = false;
+  try {
+    // 한 번만 돈다. --help는 네트워크를 타지 않아 빠르다.
+    const help = execFileSync(resolveYtdlpPath(), ['--help'], {
+      encoding: 'utf8',
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    supported = help.includes('--js-runtimes');
+  } catch {
+    // 바이너리를 못 부르면 여기서 판단하지 않는다. 실제 실행이 제 오류를 낼 것이다.
+  }
+
+  if (!supported) {
+    console.warn(
+      '[yt-dlp] 이 바이너리는 --js-runtimes를 모릅니다. 유튜브가 일부 포맷을 주지 않아 ' +
+        '403이 날 수 있습니다. `npm run update-ytdlp`으로 갱신해보세요.'
+    );
+    jsRuntimeCache = [];
+    return jsRuntimeCache;
+  }
+
+  const runtime = setting || `node:${process.execPath}`;
+  console.log(`[yt-dlp] JavaScript 런타임을 사용합니다: ${runtime}`);
+  jsRuntimeCache = ['--js-runtimes', runtime];
+  return jsRuntimeCache;
 }
 
 let warnedExtraArgs = false;
@@ -239,6 +296,7 @@ async function resolveTrack(query) {
     '-f',
     'bestaudio/best',
     ...cookieArgs(),
+    ...jsRuntimeArgs(),
     ...extraArgs(),
   ]);
 
@@ -295,6 +353,7 @@ function spawnAudioStream(webpageUrl, { opusOnly = false } = {}) {
       ...cookieArgs(),
       // 조회를 통과시킨 클라이언트로 스트림도 열어야 한다. 한쪽에만 붙이면
       // 검색은 되는데 재생만 막히는, 원인을 찾기 어려운 상태가 된다.
+      ...jsRuntimeArgs(),
       ...extraArgs(),
     ],
     { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }
@@ -308,6 +367,7 @@ module.exports = {
   describeTrackError,
   cookieArgs,
   extraArgs,
+  jsRuntimeArgs,
   splitArgs,
   resolveYtdlpPath,
 };

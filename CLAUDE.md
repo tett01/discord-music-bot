@@ -156,6 +156,8 @@ yt-dlp (spawn) → stdout ─────────────────→
 
 **yt-dlp가 뽑은 스트림 URL을 ffmpeg가 직접 열게 바꾸지 마세요.** 그 URL은 yt-dlp가 쓴 클라이언트/헤더에 묶여 있어 ffmpeg의 요청은 403 Forbidden으로 거부됩니다. yt-dlp가 직접 받아 파이프로 넘기는 현재 구조가 이 문제를 피하는 방식입니다.
 
+**`jsRuntimeArgs()`가 `--js-runtimes node:<process.execPath>`를 붙입니다.** 유튜브는 재생 URL의 `n`을 JS로 풀어야 온전한 포맷을 주는데, 런타임이 없으면 yt-dlp가 우회 클라이언트로 떨어지고 **그 URL이 IP에 묶여 데이터센터에서 403으로 거부됩니다.** 기본 런타임은 deno뿐이라 대개 없지만, 우리는 Node 위에서 도니 설치할 것이 없습니다. **낡은 바이너리에 이 옵션을 넘기면 "unknown option"으로 재생이 통째로 죽으므로**, `--help`로 지원 여부를 한 번 확인하고 캐시합니다. 이 확인을 지우지 마세요.
+
 **yt-dlp 인자를 늘릴 때는 `resolveTrack`과 `spawnAudioStream` 양쪽에 넣으세요.** 조회에만 붙이면 **검색은 되는데 재생만 막히는** 상태가 됩니다. `cookieArgs()`와 `extraArgs()`가 두 곳에 나란히 들어가 있는 것이 그래서입니다. `extraArgs()`는 `YTDLP_PLAYER_CLIENT`(지름길)와 `YTDLP_EXTRA_ARGS`(무엇이든)를 읽는데, 유튜브 봇 판정을 **쿠키 없이** 비껴가려는 시도를 코드 수정 없이 해보기 위한 구멍입니다.
 
 yt-dlp 바이너리는 `yt-dlp-exec/src/constants`에서 경로만 가져오고 실행은 `node:child_process`로 직접 합니다([youtube.js](src/youtube.js)). 패키지의 execa 래퍼는 쓰지 않습니다.

@@ -233,3 +233,43 @@ test('splitArgs는 공백과 따옴표를 다룬다', () => {
   // 닫히지 않은 따옴표를 던지지는 않는다. 여기서 죽는 것보다 yt-dlp가 거부하는 편이 낫다.
   assert.deepEqual(splitArgs('--opt "안 닫힘'), ['--opt', '안 닫힘']);
 });
+
+// --- JavaScript 런타임 ---
+//
+// jsRuntimeArgs는 결과를 모듈 수준에 캐시하므로(바이너리 --help를 매번 부르지 않으려고)
+// 설정별 동작은 프로세스를 나눠서 본다.
+
+const { execFileSync } = require('node:child_process');
+
+const runWith = (env) =>
+  execFileSync(
+    process.execPath,
+    ['-e', `console.log(JSON.stringify(require(${JSON.stringify(path.join(__dirname, '..', 'src', 'youtube'))}).jsRuntimeArgs()))`],
+    { env: { ...process.env, ...env }, encoding: 'utf8' }
+  )
+    .trim()
+    .split('\n')
+    .pop();
+
+test('YTDLP_JS_RUNTIME=off면 인자를 붙이지 않는다', () => {
+  assert.deepEqual(JSON.parse(runWith({ YTDLP_JS_RUNTIME: 'off' })), []);
+});
+
+test('기본값은 지금 돌고 있는 Node를 물려준다', () => {
+  // 런타임이 없으면 yt-dlp가 n 파라미터를 풀지 못해 IP에 묶인 URL을 받고, 그것이
+  // 데이터센터에서 403으로 거부된다. 우리는 Node 위에서 도니 쓸 것이 이미 있다.
+  const args = JSON.parse(runWith({ YTDLP_JS_RUNTIME: '' }));
+
+  // 낡은 바이너리(--js-runtimes 모름)에서는 빈 배열이 정상이다. 그때는 검증할 것이 없다.
+  if (args.length === 0) return;
+
+  assert.equal(args[0], '--js-runtimes');
+  assert.match(args[1], /^node:/);
+  assert.ok(args[1].endsWith(process.execPath), `실행 중인 Node를 가리켜야 한다: ${args[1]}`);
+});
+
+test('YTDLP_JS_RUNTIME에 값을 주면 그대로 쓴다', () => {
+  const args = JSON.parse(runWith({ YTDLP_JS_RUNTIME: 'deno' }));
+  if (args.length === 0) return; // 지원하지 않는 바이너리
+  assert.deepEqual(args, ['--js-runtimes', 'deno']);
+});
