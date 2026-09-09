@@ -10,6 +10,7 @@ const { startMelonChartRefresh, stopMelonChartRefresh } = require('./melon');
 const { startKeepAlive, stopKeepAlive } = require('./keepalive');
 const { initPlayDl } = require('./playdl');
 const { selectedEngine } = require('./source');
+const { cookieStatus } = require('./youtube');
 
 const { DISCORD_TOKEN } = process.env;
 
@@ -64,6 +65,8 @@ client.once(Events.ClientReady, (c) => {
   ready = true;
   console.log(`✅ 로그인 완료: ${c.user.tag}`);
   console.log(`🎧 오디오 엔진: ${selectedEngine()}`);
+  // 쿠키를 설정했는데 왜 그대로냐고 헤매지 않도록 부팅 때 상태를 밝힌다.
+  console.log(`🍪 ${cookieStatus()}`);
   // 즉시 한 번 받고 이후 1시간마다 갱신한다. /멜론차트는 이 캐시만 읽는다.
   startMelonChartRefresh();
 });

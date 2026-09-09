@@ -207,6 +207,22 @@ function extraArgs() {
   return args;
 }
 
+/**
+ * 쿠키가 실제로 전달되고 있는지 한 줄로 알린다.
+ *
+ * 쿠키를 설정했는데 아무 변화가 없을 때, **무엇이 잘못됐는지 알 방법이 없었다.**
+ * 환경변수가 비었는지, 경로가 틀렸는지, 잘 먹고 있는지를 로그 한 줄로 가른다.
+ * 호스팅 패널에서는 셸을 쓰기 어려워 이 한 줄이 유일한 확인 수단이 된다.
+ *
+ * @returns {string}
+ */
+function cookieStatus() {
+  const configured = (process.env.YTDLP_COOKIES || '').trim();
+  if (!configured) return '쿠키: 설정 안 됨 (환경변수 YTDLP_COOKIES가 비어 있습니다)';
+  if (!fs.existsSync(configured)) return `쿠키: 파일 없음 — ${configured} (경로를 확인하세요)`;
+  return `쿠키: 적용됨 — ${configured}`;
+}
+
 function isYoutubeUrl(text) {
   return YOUTUBE_URL_REGEX.test(text.trim());
 }
@@ -366,6 +382,7 @@ module.exports = {
   spawnAudioStream,
   describeTrackError,
   cookieArgs,
+  cookieStatus,
   extraArgs,
   jsRuntimeArgs,
   splitArgs,

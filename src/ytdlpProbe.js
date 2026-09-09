@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { resolveYtdlpPath, cookieArgs } = require('./youtube');
+const { resolveYtdlpPath, cookieArgs, cookieStatus } = require('./youtube');
 
 // 이만큼 흘러나오면 재생에 문제가 없다고 본다. 곡 전체를 받을 이유가 없다.
 const ENOUGH = 300 * 1024;
@@ -113,7 +113,7 @@ async function probe(url) {
  * @returns {string}
  */
 function formatProbe(results) {
-  const lines = ['=== yt-dlp 조건별 비교 (같은 곡, 한 가지씩만 변경) ==='];
+  const lines = ['=== yt-dlp 조건별 비교 (같은 곡, 한 가지씩만 변경) ===', `  ${cookieStatus()}`, ''];
   for (const r of results) {
     lines.push(`  ${r.name.padEnd(26)} ${r.ok ? '성공' : '실패'}  ${r.detail}`);
   }
