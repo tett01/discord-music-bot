@@ -39,6 +39,12 @@ function skipReason() {
   // play-dl만 쓰기로 한 배포(무료 호스팅 등)에서는 40MB짜리 바이너리를 받을 이유가 없다.
   // 디스크와 빌드 시간을 아끼려면 SKIP_YTDLP_DOWNLOAD=1을 준다.
   if (String(process.env.SKIP_YTDLP_DOWNLOAD || '').trim() === '1') return 'SKIP_YTDLP_DOWNLOAD=1';
+
+  // 유튜브가 뭔가 바꾸면 낡은 바이너리는 조회까지만 되고 다운로드가 403으로 막힌다.
+  // 그런데 아래 "이미 있습니다"에 걸려 npm install을 다시 돌려도 갱신되지 않는다.
+  // `npm run update-ytdlp`이 이 변수를 세워 그 문을 연다.
+  if (String(process.env.FORCE_YTDLP_DOWNLOAD || '').trim() === '1') return null;
+
   if ((process.env.AUDIO_ENGINE || '').trim().toLowerCase() === 'playdl') return 'AUDIO_ENGINE=playdl';
   if ((process.env.YTDLP_PATH || '').trim()) return 'YTDLP_PATH가 지정되어 있습니다';
   if (fs.existsSync(TARGET)) return `이미 있습니다: ${TARGET}`;
