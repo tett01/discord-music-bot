@@ -32,6 +32,44 @@ function engineOrder(engine = selectedEngine()) {
   return ['playdl', 'ytdlp'];
 }
 
+// 조회는 한 번에 정해진 개수만 돈다.
+//
+// `/재생`을 연달아 부르거나 `/멜론차트`처럼 여러 곡을 담을 때, 조회가 병렬로 뜨면
+// **재생 중인 스트림(yt-dlp) + ffmpeg 위에 조회 프로세스가 겹겹이 얹힌다.** 512MB
+// 인스턴스에서는 이것만으로 컨테이너가 프로세스를 죽인다. 조회를 줄 세워
+// **대기열에 몇 곡을 넣든 동시에 도는 조회 수를 고정한다.**
+//
+// play-dl 조회는 프로세스를 띄우지 않아 대개 순식간에 빠져나가므로, 실제로 줄이
+// 생기는 것은 yt-dlp로 떨어졌을 때뿐이다. 처리 순서는 요청 순서 그대로다.
+const DEFAULT_LOOKUP_LIMIT = 1;
+
+function parseLookupLimit(raw = process.env.SOURCE_LOOKUP_LIMIT) {
+  const value = Number.parseInt(String(raw ?? '').trim(), 10);
+  // 잘못된 값에 예외를 던지지 않는다. 설정 실수로 재생이 통째로 막히는 편이 더 나쁘다.
+  if (!Number.isInteger(value) || value < 1 || value > 8) return DEFAULT_LOOKUP_LIMIT;
+  return value;
+}
+
+const lookupLimit = parseLookupLimit();
+let activeLookups = 0;
+const waitingLookups = [];
+
+function acquireLookupSlot() {
+  if (activeLookups < lookupLimit) {
+    activeLookups += 1;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => waitingLookups.push(resolve));
+}
+
+function releaseLookupSlot() {
+  // 기다리는 쪽이 있으면 슬롯을 그대로 넘긴다. activeLookups를 내렸다가 올리면
+  // 그 사이에 새 요청이 끼어들어 상한을 넘길 수 있다.
+  const next = waitingLookups.shift();
+  if (next) return next();
+  activeLookups -= 1;
+}
+
 /**
  * 링크·검색어를 트랙으로 바꾼다. 실패하면 다음 엔진으로 넘어간다.
  *
@@ -42,6 +80,17 @@ function engineOrder(engine = selectedEngine()) {
  * @returns {Promise<{ title: string, url: string, duration: number, thumbnail: string | null, engine: string }>}
  */
 async function resolveTrack(query) {
+  await acquireLookupSlot();
+  try {
+    return await resolveTrackNow(query);
+  } finally {
+    // 실패해도 반드시 놓아야 한다. 여기서 새면 대기열이 통째로 멈춘다.
+    releaseLookupSlot();
+  }
+}
+
+/** 줄 세우기를 거치지 않는 실제 조회. `resolveTrack`만 부른다. */
+async function resolveTrackNow(query) {
   const order = engineOrder();
   let lastError;
 
@@ -111,6 +160,9 @@ module.exports = {
   resolveTrack,
   openSource,
   isVideoLevelFailure,
+  parseLookupLimit,
+  // 테스트에서 줄이 실제로 서는지 보기 위한 창. 운영 코드는 건드리지 않는다.
+  lookupState: () => ({ limit: lookupLimit, active: activeLookups, waiting: waitingLookups.length }),
   // 오류 문구 매핑은 youtube.js가 계속 소유한다. play-dl의 오류 문구도 같은 표에 넣어
   // 두 엔진이 한 곳에서 관리되게 했다.
   describeTrackError: ytdlp.describeTrackError,
