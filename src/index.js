@@ -10,7 +10,7 @@ const { startMelonChartRefresh, stopMelonChartRefresh } = require('./melon');
 const { startKeepAlive, stopKeepAlive } = require('./keepalive');
 const { initPlayDl } = require('./playdl');
 const { selectedEngine } = require('./source');
-const { cookieStatus } = require('./youtube');
+const { cookieStatus = () => '쿠키: 상태를 알 수 없습니다' } = require('./youtube');
 
 const { DISCORD_TOKEN } = process.env;
 
@@ -66,7 +66,15 @@ client.once(Events.ClientReady, (c) => {
   console.log(`✅ 로그인 완료: ${c.user.tag}`);
   console.log(`🎧 오디오 엔진: ${selectedEngine()}`);
   // 쿠키를 설정했는데 왜 그대로냐고 헤매지 않도록 부팅 때 상태를 밝힌다.
-  console.log(`🍪 ${cookieStatus()}`);
+  //
+  // 파일을 하나씩 올리는 호스팅에서는 src/가 잠시 섞인 상태가 된다. **진단용 한 줄
+  // 때문에 봇이 부팅을 못 하는 일은 없어야 한다.** 실제로 youtube.js만 낡은 채로
+  // 남았을 때 여기서 TypeError로 죽어 서버가 내려갔다.
+  try {
+    console.log(`🍪 ${cookieStatus()}`);
+  } catch (error) {
+    console.warn('🍪 쿠키 상태를 확인하지 못했습니다 (src/youtube.js가 낡았을 수 있습니다):', error.message);
+  }
   // 즉시 한 번 받고 이후 1시간마다 갱신한다. /멜론차트는 이 캐시만 읽는다.
   startMelonChartRefresh();
 });
