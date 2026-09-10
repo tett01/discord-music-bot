@@ -51,7 +51,9 @@
 
 ## 사전 준비물
 
-1. **Node.js 23.4 이상** (내장 `node:sqlite`를 플래그 없이 사용하기 위해 필요. 24 LTS 권장)
+1. **Node.js 22.12 이상** (`@discordjs/voice`의 요구 사항. **24 LTS 권장**)
+   - **23.4 이상**이면 내장 `node:sqlite`로 `data/bot.sqlite`에 저장합니다. 기본이자 권장 경로입니다.
+   - **22.12 ~ 23.3**이면 `node:sqlite`가 없어 **JSON 파일(`data/bot.json`)로 자동 전환**됩니다. 기능 차이는 없습니다. 무료 호스팅 패널의 Node 이미지가 대개 22에서 멈춰 있어 열어둔 길입니다. ([저장 백엔드](#저장-백엔드) 참고)
 2. **디스코드 봇 생성** — https://discord.com/developers/applications
    - **Bot** 탭 → Reset Token → 토큰 복사 → `.env`의 `DISCORD_TOKEN`
    - **General Information** → Application ID → `.env`의 `CLIENT_ID`
@@ -198,7 +200,7 @@ Render는 여기에 더해 **컨테이너가 포트를 열지 않으면 배포 �
 - **Health Check Path**: `/health`
 - **환경변수**: `NODE_VERSION=24`, `DISCORD_TOKEN`, `CLIENT_ID`, `AUDIO_ENGINE=auto`, `YOUTUBE_COOKIE`
 
-`NODE_VERSION`을 빠뜨리면 안 됩니다. 이 봇은 Node 내장 SQLite(`node:sqlite`)를 쓰므로 **23.4 미만에서는 부팅 시 바로 종료됩니다.**
+`NODE_VERSION`은 되도록 지정하세요. 빠뜨려도 부팅은 되지만(22.12 이상이면 JSON 백엔드로 전환), SQLite를 쓰려면 **23.4 이상**이 필요합니다.
 
 `PORT`는 Render가 자동으로 넣어 주므로 직접 설정하지 마세요.
 
@@ -388,9 +390,37 @@ play-dl은 받은 쿠키를 `.data/youtube.data`에 저장하고 이후 토큰�
 
 디스코드 기본값은 64 kbps이므로 **96 kbps로만 올려도 체감 차이가 있고, 128 kbps에서 상한에 도달합니다.** 참고로 채널이 허용하는 값은 서버 부스트 티어에 따라 다릅니다 — 티어 0 = 96 kbps, 티어 1 = 128, 티어 2 = 256, 티어 3 = 384 kbps. 즉 **부스트는 이 봇의 음질과 무관하며**, 티어 1이면 이미 충분합니다.
 
+## 저장 백엔드
+
+플레이리스트·음량·반복 모드·음질 모드·음악 채널 지정을 어디에 담을지 두 가지 중에서 고릅니다. **어느 쪽이든 기능과 명령어는 완전히 같습니다.**
+
+| | SQLite (기본) | JSON |
+| --- | --- | --- |
+| 필요 Node | 23.4 이상 | 22.12 이상 |
+| 파일 | `data/bot.sqlite` | `data/bot.json` |
+| 고르는 때 | `node:sqlite`가 있으면 | 없으면 자동 전환 |
+
+`BOT_DB_BACKEND`로 강제할 수 있습니다 — `auto`(기본) / `sqlite` / `json`. `sqlite`로 지정했는데 Node가 낮으면, 조용히 JSON으로 떨어지지 않고 **이유를 말하고 종료합니다**(설정이 초기화된 것으로 오해하지 않도록).
+
+JSON 백엔드는 쓸 때마다 파일 전체를 임시 파일에 쓰고 `rename`으로 갈아끼웁니다. 쓰는 도중 인스턴스가 죽어도 반쯤 잘린 파일이 남지 않습니다. 그래도 파일이 깨져 있으면 `.broken-<시각>`으로 옮겨두고 빈 상태로 부팅합니다 — 봇이 영영 뜨지 못하는 것보다 낫기 때문입니다.
+
+### 백엔드 사이 데이터 옮기기
+
+**두 백엔드는 파일을 공유하지 않습니다.** 그냥 갈아끼우면 플레이리스트와 서버 설정이 빈 상태로 시작합니다.
+
+```bash
+node scripts/migrate-storage.js sqlite-to-json
+```
+
+```bash
+node scripts/migrate-storage.js json-to-sqlite
+```
+
+대상 쪽에 이미 있는 서버·플레이리스트는 건너뛰므로 여러 번 돌려도 안전합니다. **SQLite를 읽고 쓰는 쪽은 Node 23.4 이상에서만 됩니다** — Node 22 호스트로 옮겨 갈 때는 높은 버전이 있는 PC에서 `sqlite-to-json`을 먼저 돌리고, 나온 `data/bot.json`을 호스트에 올리세요.
+
 ## 기술적 참고 사항
 
-- **데이터 저장**: Node 내장 `node:sqlite`를 사용하며 `data/bot.sqlite`에 저장됩니다. 네이티브 빌드 도구가 필요 없습니다.
+- **데이터 저장**: 기본은 Node 내장 `node:sqlite`이며 `data/bot.sqlite`에 저장됩니다. 네이티브 빌드 도구가 필요 없습니다. Node가 23.4 미만이면 JSON 파일로 자동 전환됩니다 — [저장 백엔드](#저장-백엔드) 참고.
   > `better-sqlite3`는 `@discordjs/voice` 0.19와 함께 로드하면 프로세스가 SIGABRT로 죽는 충돌이 있어 사용하지 않습니다.
 
   플레이리스트·음량·반복 모드·음악 채널 지정이 **전부 이 파일 하나에** 들어 있습니다. `data/`는 `.gitignore` 대상이라 저장소에 올라가지 않으므로, **이 파일을 잃으면 플레이리스트도 함께 사라집니다.** 백업/이전은 아래 [데이터 백업](#데이터-백업)을 참고하세요.

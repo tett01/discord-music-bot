@@ -76,15 +76,27 @@ npm test
 
 `player.queue` / `player.current` / `player.loopMode`는 `TrackQueue`를 비추는 **getter**입니다. 명령어 쪽에서 읽기만 하며, **대입하면 터집니다** — 상태를 바꾸려면 `player.tracks`의 메서드를 쓰세요.
 
-**SQLite** — [db.js](src/db.js)의 `data/bot.sqlite`. 음량, 반복 모드, 음질 모드, 음악 채널 지정, 플레이리스트가 들어 있습니다. `db.js`는 `require` 시점에 DB를 열고 스키마 DDL을 실행합니다(모듈 부작용). `.gitignore` 대상이라 저장소에 없으며, 이 파일이 유일한 사본입니다.
+**영속 저장** — 음량, 반복 모드, 음질 모드, 음악 채널 지정, 플레이리스트가 들어 있습니다. `.gitignore` 대상이라 저장소에 없으며, 이 파일이 유일한 사본입니다.
 
-경로는 `BOT_DB_PATH` 환경변수로 바꿀 수 있습니다. **테스트는 `require` 전에 이 값을 `':memory:'`로 지정해야 합니다** — 지정하지 않으면 운영 DB를 건드립니다. `db.js`를 직간접적으로 `require`하는 테스트 파일 맨 위에 넣으세요.
+**백엔드가 두 개입니다.** [db.js](src/db.js)는 고르기만 하고, 실제 구현은 [dbSqlite.js](src/dbSqlite.js)(`data/bot.sqlite`)와 [dbJson.js](src/dbJson.js)(`data/bot.json`)에 있습니다. **명령어와 `musicManager`는 `db.js`만 봅니다** — 백엔드를 직접 `require`하지 마세요(테스트는 계약 검증을 위한 예외).
 
-새 서버의 기본 음량은 `db.js`의 `DEFAULT_VOLUME`(15)입니다. **DDL의 `DEFAULT`만 고치면 이미 만들어진 DB에는 반영되지 않으므로**(`CREATE TABLE IF NOT EXISTS`는 기존 테이블을 건드리지 않습니다), `getGuildSettings`의 INSERT가 이 값을 직접 넣습니다. 기본값을 바꿀 때는 상수만 고치면 되고, **이미 저장된 서버의 값은 그대로 남습니다** — 필요하면 DB에서 직접 UPDATE해야 합니다.
+`node:sqlite`가 있으면 SQLite, 없으면 JSON입니다. `BOT_DB_BACKEND`(`auto`|`sqlite`|`json`)로 강제할 수 있고, `sqlite`로 강제했는데 Node가 낮으면 조용히 폴백하지 않고 **이유를 말하고 죽습니다** — 설정이 초기화된 것으로 오해하게 두는 편이 더 나쁩니다.
 
-**칼럼을 추가할 때는 DDL만 고치면 안 됩니다.** `CREATE TABLE IF NOT EXISTS`가 기존 테이블을 건드리지 않으므로 이미 만들어진 DB에는 반영되지 않고, `data/bot.sqlite`는 저장소에 없는 유일한 사본이라 지우고 다시 만들 수도 없습니다. `ensureColumn(테이블, 칼럼, 정의)`로 따로 붙이세요(NOT NULL은 DEFAULT가 있어야 `ALTER TABLE`로 추가됩니다). [test/dbMigration.test.js](test/dbMigration.test.js)가 옛 스키마를 만들어 두고 이 경로를 검증합니다 — 다른 테스트와 달리 임시 **파일** DB를 씁니다.
+**JSON 백엔드가 있는 이유는 Node 버전입니다.** 무료 호스팅 패널의 Node 이미지가 대개 22에서 멈춰 있는데, `node:sqlite`는 23.4를 요구합니다. 진짜 하한은 `@discordjs/voice`의 **22.12**이고, [nodeVersion.js](src/nodeVersion.js)가 두 선을 나눠 그 사이 구간에서는 경고만 남기고 계속 갑니다. **`checkNodeVersion()`이 종료하는 것은 22.12 미만일 때뿐입니다.**
 
-`LOOP_MODES`와 마찬가지로 **`AUDIO_QUALITY_MODES`(db.js)와 [quality.js](src/commands/quality.js)의 `addChoices`·`LABELS`도 함께 고쳐야 합니다.** `musicManager.test.js`가 둘의 일치를 검사합니다.
+**두 백엔드는 내보내는 함수의 이름·인자·반환 모양이 정확히 같아야 합니다.** `test/db.test.js`가 같은 검증을 양쪽에 돌리고 export 키 목록까지 비교합니다. 함수를 추가하면 반드시 양쪽에 넣으세요. 기본값과 `AUDIO_QUALITY_MODES`는 [dbConstants.js](src/dbConstants.js) 한 곳에 있습니다.
+
+**두 백엔드는 데이터를 공유하지 않습니다.** 갈아끼우면 빈 상태로 시작하므로 `scripts/migrate-storage.js`로 옮겨야 합니다.
+
+`dbSqlite.js`는 `require` 시점에 DB를 열고 스키마 DDL을 실행합니다(모듈 부작용).
+
+경로는 `BOT_DB_PATH` 환경변수로 바꿀 수 있습니다(JSON은 `BOT_DB_JSON_PATH`). **테스트는 `require` 전에 `BOT_DB_PATH`를 `':memory:'`로 지정해야 합니다** — 지정하지 않으면 운영 DB를 건드립니다. 이 값이 `':memory:'`면 **JSON 백엔드도 파일을 쓰지 않으므로**, 백엔드를 바꿔 끼워도 스위치는 이것 하나입니다. `db.js`를 직간접적으로 `require`하는 테스트 파일 맨 위에 넣으세요.
+
+새 서버의 기본 음량은 `dbConstants.js`의 `DEFAULT_VOLUME`(15)입니다. **DDL의 `DEFAULT`만 고치면 이미 만들어진 DB에는 반영되지 않으므로**(`CREATE TABLE IF NOT EXISTS`는 기존 테이블을 건드리지 않습니다), `getGuildSettings`의 INSERT가 이 값을 직접 넣습니다. 기본값을 바꿀 때는 상수만 고치면 되고, **이미 저장된 서버의 값은 그대로 남습니다** — 필요하면 DB에서 직접 UPDATE해야 합니다.
+
+**칼럼을 추가할 때는 DDL만 고치면 안 됩니다.** (SQLite 백엔드 이야기입니다 — JSON 쪽은 없는 필드를 기본값으로 채웁니다.) `CREATE TABLE IF NOT EXISTS`가 기존 테이블을 건드리지 않으므로 이미 만들어진 DB에는 반영되지 않고, `data/bot.sqlite`는 저장소에 없는 유일한 사본이라 지우고 다시 만들 수도 없습니다. `ensureColumn(테이블, 칼럼, 정의)`로 따로 붙이세요(NOT NULL은 DEFAULT가 있어야 `ALTER TABLE`로 추가됩니다). [test/dbMigration.test.js](test/dbMigration.test.js)가 옛 스키마를 만들어 두고 이 경로를 검증합니다 — 다른 테스트와 달리 임시 **파일** DB를 씁니다.
+
+`LOOP_MODES`와 마찬가지로 **`AUDIO_QUALITY_MODES`(dbConstants.js)와 [quality.js](src/commands/quality.js)의 `addChoices`·`LABELS`도 함께 고쳐야 합니다.** `musicManager.test.js`가 둘의 일치를 검사합니다.
 
 음량과 반복 모드는 **양쪽에 다 있습니다.** `setVolume`/`setLoopMode`는 메모리와 DB에 동시에 쓰고, `GuildMusicPlayer` 생성자가 DB에서 다시 읽어 복원합니다. 한쪽만 갱신하면 재시작 시 값이 되돌아갑니다.
 
@@ -189,7 +201,7 @@ Opus 인코더 비트레이트는 음성 채널 입장 시점에 캐시한 `voic
 
 바꾸기 전에 반드시 알아야 할 것들입니다.
 
-- **`better-sqlite3`를 추가하지 마세요.** `@discordjs/voice` 0.19와 함께 로드하면 프로세스가 SIGABRT로 죽습니다. 그래서 Node 내장 `node:sqlite`를 쓰고, 그 때문에 **Node 23.4 이상**이 필요합니다(플래그 없이 쓰기 위해).
+- **`better-sqlite3`를 추가하지 마세요.** `@discordjs/voice` 0.19와 함께 로드하면 프로세스가 SIGABRT로 죽습니다. 그래서 Node 내장 `node:sqlite`를 쓰고, 그 때문에 SQLite 백엔드는 **Node 23.4 이상**을 요구합니다(플래그 없이 쓰기 위해). 그 밑에서는 JSON 백엔드로 떨어집니다.
 - **`@discordjs/voice`를 0.19 미만으로 내리지 마세요.** 디스코드가 DAVE(종단간 암호화)를 요구하므로 `@snazzah/davey`와 함께 0.19+ 가 필수입니다. 구버전은 음성 서버가 `4017 E2EE/DAVE protocol required`로 연결을 거부합니다.
 - **play-dl(1.9.7)은 유지보수가 멈춘 라이브러리이고, 지금도 이미 반쯤 막혀 있습니다.** 마지막 릴리스가 2023년이라 유튜브가 그 뒤 바꾼 서명(nsig) 로직을 풀지 못합니다. 조회는 되지만 `stream()`은 `Invalid URL`로 죽습니다. 그래서 이 저장소는 play-dl로 갈아탄 것이 아니라 **앞에 세워 둔 것**이고, **yt-dlp 경로가 실제 재생을 담당합니다.** 정리한다는 이유로 `youtube.js`나 `bin/yt-dlp` 확보 경로를 지우면 소리가 아예 안 납니다.
 - **쿠키는 두 엔진이 같은 파일을 씁니다.** `YTDLP_COOKIES`(Netscape cookies.txt)를 지정하면 `playdl.js`의 `normalizeCookie`가 그걸 헤더 문자열로 바꿔 play-dl에도 먹입니다. 형식을 갈라 놓으면 폴백으로 넘어갔을 때 쿠키가 없어 똑같이 차단당합니다.
