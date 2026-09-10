@@ -1,194 +1,51 @@
-const path = require('node:path');
-const fs = require('node:fs');
-// Node 내장 SQLite를 쓴다. better-sqlite3(네이티브 애드온)는 @discordjs/voice 0.19와
-// 함께 로드될 때 프로세스가 SIGABRT로 죽는 충돌이 있어 사용하지 않는다.
-const { DatabaseSync } = require('node:sqlite');
-
-// 기본값은 data/bot.sqlite다. 테스트에서 운영 DB를 건드리지 않도록 BOT_DB_PATH로
-// 경로를 바꿀 수 있게 열어뒀다. (테스트는 ':memory:'를 쓴다)
-const dbPath = process.env.BOT_DB_PATH || path.join(__dirname, '..', 'data', 'bot.sqlite');
-
-if (dbPath !== ':memory:') {
-  const dataDir = path.dirname(dbPath);
-  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-}
-
-// 새 서버가 처음 재생할 때의 음량(%). 100은 대부분의 음성 채널에서 너무 컸다.
-// DDL의 DEFAULT는 이미 만들어진 테이블에는 적용되지 않으므로, INSERT에서도 이 값을
-// 명시적으로 넣는다. 그래야 기존 DB에 새로 들어온 서버도 같은 기본값을 받는다.
-const DEFAULT_VOLUME = 15;
-
-// 오디오 전달 방식.
+// 저장 백엔드를 고르고 그대로 다시 내보낸다. **명령어와 musicManager는 이 파일만 본다** —
+// dbSqlite.js나 dbJson.js를 직접 require하지 마세요. (테스트는 계약 검증을 위해 예외)
 //
-// - normal   : 디코딩 → PCM → 재인코딩. 음량 조절과 비트레이트 제한이 가능하다.
-// - original : 유튜브 Opus를 재인코딩 없이 그대로 흘려보낸다. 음질 손실과 CPU 사용이
-//              줄어드는 대신 PCM을 거치지 않으므로 음량 조절이 불가능하다.
+// - sqlite : Node 23.4 이상. 기본이자 권장. data/bot.sqlite
+// - json   : node:sqlite가 없을 때. 무료 호스팅 패널의 Node 22 이미지를 위한 길. data/bot.json
 //
-// /음질 명령어의 선택지가 이 목록에 묶여 있다. 값을 늘리면 quality.js도 같이 고쳐야 한다.
-const AUDIO_QUALITY_MODES = ['normal', 'original'];
-const DEFAULT_AUDIO_QUALITY = 'normal';
+// BOT_DB_BACKEND로 강제할 수 있다(sqlite | json | auto). 기본 auto는 node:sqlite가
+// 있으면 sqlite를, 없으면 json을 고른다.
+//
+// ⚠️ **두 백엔드는 데이터를 공유하지 않습니다.** 백엔드를 바꾸면 플레이리스트와 서버
+// 설정이 빈 상태로 시작합니다. 옮기려면 scripts/migrate-storage.js를 쓰세요.
+const requested = (process.env.BOT_DB_BACKEND || 'auto').toLowerCase();
 
-const db = new DatabaseSync(dbPath);
-// 메모리 DB에는 저널 파일이 없으므로 WAL을 적용하지 않는다.
-if (dbPath !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
-
-db.exec(`
-CREATE TABLE IF NOT EXISTS guild_settings (
-  guild_id TEXT PRIMARY KEY,
-  text_channel_id TEXT,
-  volume INTEGER NOT NULL DEFAULT ${DEFAULT_VOLUME},
-  loop_mode TEXT NOT NULL DEFAULT 'off',
-  audio_quality TEXT NOT NULL DEFAULT '${DEFAULT_AUDIO_QUALITY}'
-);
-
-CREATE TABLE IF NOT EXISTS playlists (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  guild_id TEXT NOT NULL,
-  name TEXT NOT NULL,
-  UNIQUE(guild_id, name)
-);
-
-CREATE TABLE IF NOT EXISTS playlist_tracks (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  playlist_id INTEGER NOT NULL,
-  title TEXT NOT NULL,
-  url TEXT NOT NULL,
-  position INTEGER NOT NULL,
-  FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE
-);
-`);
-
-/**
- * 테이블에 칼럼이 없으면 추가한다.
- *
- * `CREATE TABLE IF NOT EXISTS`는 이미 있는 테이블을 건드리지 않으므로, DDL에 칼럼을
- * 늘려도 **기존 DB에는 반영되지 않는다.** data/bot.sqlite는 저장소에 없는 유일한 사본이라
- * 지우고 다시 만들 수도 없다. 그래서 새 칼럼은 여기서 따로 붙인다.
- *
- * NOT NULL 칼럼은 DEFAULT가 있어야 ALTER TABLE로 추가할 수 있다.
- */
-function ensureColumn(table, column, definition) {
-  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
-  if (columns.some((c) => c.name === column)) return;
-  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-}
-
-ensureColumn('guild_settings', 'audio_quality', `TEXT NOT NULL DEFAULT '${DEFAULT_AUDIO_QUALITY}'`);
-
-function getGuildSettings(guildId) {
-  let row = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guildId);
-  if (!row) {
-    db.prepare(
-      'INSERT INTO guild_settings (guild_id, volume, audio_quality) VALUES (?, ?, ?)'
-    ).run(guildId, DEFAULT_VOLUME, DEFAULT_AUDIO_QUALITY);
-    row = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guildId);
+function sqliteAvailable() {
+  try {
+    require('node:sqlite');
+    return true;
+  } catch {
+    return false;
   }
-  return row;
 }
 
-function setTextChannel(guildId, channelId) {
-  getGuildSettings(guildId);
-  db.prepare('UPDATE guild_settings SET text_channel_id = ? WHERE guild_id = ?').run(channelId, guildId);
-}
+function pick() {
+  if (requested === 'json') return 'json';
 
-/** 음악 채널 지정을 해제한다. (모든 채널에서 음악 명령어 사용 가능한 초기 상태로 되돌린다) */
-function clearTextChannel(guildId) {
-  getGuildSettings(guildId);
-  db.prepare('UPDATE guild_settings SET text_channel_id = NULL WHERE guild_id = ?').run(guildId);
-}
-
-function setVolume(guildId, volume) {
-  getGuildSettings(guildId);
-  db.prepare('UPDATE guild_settings SET volume = ? WHERE guild_id = ?').run(volume, guildId);
-}
-
-function setLoopMode(guildId, mode) {
-  getGuildSettings(guildId);
-  db.prepare('UPDATE guild_settings SET loop_mode = ? WHERE guild_id = ?').run(mode, guildId);
-}
-
-function setAudioQuality(guildId, quality) {
-  if (!AUDIO_QUALITY_MODES.includes(quality)) {
-    throw new Error(`알 수 없는 음질 모드: ${quality}`);
-  }
-  getGuildSettings(guildId);
-  db.prepare('UPDATE guild_settings SET audio_quality = ? WHERE guild_id = ?').run(quality, guildId);
-}
-
-function createPlaylist(guildId, name) {
-  return db.prepare('INSERT INTO playlists (guild_id, name) VALUES (?, ?)').run(guildId, name);
-}
-
-function getPlaylist(guildId, name) {
-  return db.prepare('SELECT * FROM playlists WHERE guild_id = ? AND name = ?').get(guildId, name);
-}
-
-function listPlaylists(guildId) {
-  return db.prepare('SELECT * FROM playlists WHERE guild_id = ? ORDER BY name').all(guildId);
-}
-
-function deletePlaylist(guildId, name) {
-  const playlist = getPlaylist(guildId, name);
-  if (!playlist) return false;
-  db.prepare('DELETE FROM playlist_tracks WHERE playlist_id = ?').run(playlist.id);
-  db.prepare('DELETE FROM playlists WHERE id = ?').run(playlist.id);
-  return true;
-}
-
-function addTrackToPlaylist(playlistId, title, url) {
-  // COUNT(*)가 아니라 MAX(position)+1을 쓴다. 곡 수와 position 최대값이 어긋난
-  // 상태에서 COUNT를 쓰면 기존 곡과 position이 충돌한다.
-  const { next } = db
-    .prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM playlist_tracks WHERE playlist_id = ?')
-    .get(playlistId);
-  db.prepare(
-    'INSERT INTO playlist_tracks (playlist_id, title, url, position) VALUES (?, ?, ?, ?)'
-  ).run(playlistId, title, url, next);
-}
-
-/**
- * 곡을 지우고 남은 곡의 position을 0부터 다시 매긴다.
- *
- * 재정렬은 선택이 아니다. `/플레이리스트 목록`은 표시 순서(배열 인덱스)로 번호를
- * 매기는데 `/플레이리스트 곡삭제`는 position 값으로 지운다. 구멍이 남으면 둘이
- * 어긋나 사용자가 본 번호와 다른 곡이 지워진다.
- */
-function removeTrackFromPlaylist(playlistId, position) {
-  const result = db
-    .prepare('DELETE FROM playlist_tracks WHERE playlist_id = ? AND position = ?')
-    .run(playlistId, position);
-
-  if (result.changes > 0) {
-    db.prepare(
-      'UPDATE playlist_tracks SET position = position - 1 WHERE playlist_id = ? AND position > ?'
-    ).run(playlistId, position);
+  if (requested === 'sqlite') {
+    if (sqliteAvailable()) return 'sqlite';
+    // 조용히 JSON으로 떨어지면 "설정이 왜 초기화됐지"로 헤매게 된다. 명시적으로 고른
+    // 백엔드가 없으면 이유를 말하고 죽는 편이 낫다.
+    throw new Error(
+      `BOT_DB_BACKEND=sqlite로 지정했지만 이 Node(${process.version})에는 node:sqlite가 없습니다. ` +
+        'Node를 23.4 이상으로 올리거나 BOT_DB_BACKEND=json으로 바꿔주세요.'
+    );
   }
 
-  return result;
+  return sqliteAvailable() ? 'sqlite' : 'json';
 }
 
-function getPlaylistTracks(playlistId) {
-  return db
-    .prepare('SELECT * FROM playlist_tracks WHERE playlist_id = ? ORDER BY position')
-    .all(playlistId);
+const selected = pick();
+
+if (selected === 'json') {
+  // 직접 고른 것인지 Node가 낮아서 떨어진 것인지 구분해서 찍는다. 둘을 뭉뚱그리면
+  // 로그만 보고는 Node를 올려야 하는 상황인지 알 수 없다.
+  const reason = requested === 'json' ? 'BOT_DB_BACKEND=json' : `Node ${process.version} — node:sqlite 없음`;
+  console.log(`[db] JSON 파일 저장소를 사용합니다. (${reason})`);
+  if (requested !== 'json') {
+    console.log('     동작에는 문제가 없지만, 가능하면 Node 23.4 이상에서 SQLite를 쓰는 편이 낫습니다.');
+  }
 }
 
-module.exports = {
-  db,
-  getGuildSettings,
-  setTextChannel,
-  clearTextChannel,
-  DEFAULT_VOLUME,
-  AUDIO_QUALITY_MODES,
-  DEFAULT_AUDIO_QUALITY,
-  setVolume,
-  setLoopMode,
-  setAudioQuality,
-  createPlaylist,
-  getPlaylist,
-  listPlaylists,
-  deletePlaylist,
-  addTrackToPlaylist,
-  removeTrackFromPlaylist,
-  getPlaylistTracks,
-};
+module.exports = selected === 'sqlite' ? require('./dbSqlite') : require('./dbJson');

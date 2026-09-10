@@ -5,7 +5,7 @@ node_modules/
 .env
 env
 
-# SQLite 본체와 WAL 부산물. data/bot.sqlite는 저장소에 없는 유일한 사본이다.
+# SQLite 본체와 WAL 부산물, JSON 백엔드의 파일까지. data/ 안의 것이 저장소에 없는 유일한 사본이다.
 data/
 # postinstall이 받는 yt-dlp 바이너리(약 40MB)
 bin/
