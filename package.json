@@ -11,7 +11,8 @@
     "deploy": "node src/deploy-commands.js",
     "check": "node scripts/check-syntax.js",
     "test": "node --test",
-    "postinstall": "node scripts/ensure-ytdlp.js"
+    "postinstall": "node scripts/ensure-ytdlp.js",
+    "update-ytdlp": "FORCE_YTDLP_DOWNLOAD=1 node scripts/ensure-ytdlp.js"
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.2",

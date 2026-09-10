@@ -1,4 +1,4 @@
-const { execFile, spawn } = require('node:child_process');
+const { execFile, execFileSync, spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -68,6 +68,159 @@ function cookieArgs() {
   }
 
   return ['--cookies', cookiePath];
+}
+
+let jsRuntimeCache = null;
+
+/**
+ * yt-dlp에 JavaScript 런타임을 물려준다.
+ *
+ * 유튜브는 재생 URL의 `n` 파라미터를 JS로 풀어야 온전한 포맷을 준다. 런타임이 없으면
+ * yt-dlp가 그 단계를 건너뛰고 다른 클라이언트로 우회하는데, **그렇게 얻은 URL은
+ * IP에 묶여 있어 데이터센터에서 403으로 거부되는 일이 잦다.** yt-dlp 자신도 이 경로를
+ * deprecated로 표시하고 경고를 낸다.
+ *
+ * 기본 런타임은 deno뿐이라 대부분의 호스트에는 없다. 그런데 **우리는 Node 위에서 돌고
+ * 있으므로 쓸 수 있는 런타임이 이미 손에 있다.** `process.execPath`를 그대로 물려주면
+ * 새로 설치할 것이 없다.
+ *
+ * `--js-runtimes`는 비교적 최근에 생긴 옵션이라, 낡은 바이너리에 넘기면 "unknown option"으로
+ * **재생이 통째로 죽는다.** 그래서 지원 여부를 한 번 확인하고 캐시한다.
+ *
+ * `YTDLP_JS_RUNTIME=off`로 끌 수 있다.
+ *
+ * @returns {string[]}
+ */
+function jsRuntimeArgs() {
+  if (jsRuntimeCache) return jsRuntimeCache;
+
+  const setting = (process.env.YTDLP_JS_RUNTIME || '').trim();
+  if (setting.toLowerCase() === 'off') {
+    jsRuntimeCache = [];
+    return jsRuntimeCache;
+  }
+
+  let supported = false;
+  try {
+    // 한 번만 돈다. --help는 네트워크를 타지 않아 빠르다.
+    const help = execFileSync(resolveYtdlpPath(), ['--help'], {
+      encoding: 'utf8',
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    supported = help.includes('--js-runtimes');
+  } catch {
+    // 바이너리를 못 부르면 여기서 판단하지 않는다. 실제 실행이 제 오류를 낼 것이다.
+  }
+
+  if (!supported) {
+    console.warn(
+      '[yt-dlp] 이 바이너리는 --js-runtimes를 모릅니다. 유튜브가 일부 포맷을 주지 않아 ' +
+        '403이 날 수 있습니다. `npm run update-ytdlp`으로 갱신해보세요.'
+    );
+    jsRuntimeCache = [];
+    return jsRuntimeCache;
+  }
+
+  const runtime = setting || `node:${process.execPath}`;
+  console.log(`[yt-dlp] JavaScript 런타임을 사용합니다: ${runtime}`);
+  jsRuntimeCache = ['--js-runtimes', runtime];
+  return jsRuntimeCache;
+}
+
+let warnedExtraArgs = false;
+
+/**
+ * 따옴표를 존중하며 명령줄 문자열을 인자 배열로 쪼갠다.
+ *
+ * 셸을 거치지 않고 spawn에 직접 넘기므로 우리가 직접 잘라야 한다. 셸을 흉내 내려는
+ * 것이 아니라 `--extractor-args "youtube:player_client=tv"`처럼 **따옴표로 묶인 값 하나**를
+ * 붙여넣는 흔한 경우를 살리는 것이 목적이다.
+ *
+ * @param {string} input
+ * @returns {string[]}
+ */
+function splitArgs(input) {
+  const tokens = [];
+  let current = '';
+  let quote = null;
+  let started = false;
+
+  for (const char of input) {
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      // 따옴표만으로 이루어진 빈 인자도 인자로 친다.
+      started = true;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (started) tokens.push(current);
+      current = '';
+      started = false;
+      continue;
+    }
+
+    current += char;
+    started = true;
+  }
+
+  if (started) tokens.push(current);
+  return tokens;
+}
+
+/**
+ * yt-dlp에 덧붙일 추가 인자를 만든다.
+ *
+ * 유튜브의 봇 판정은 **쿠키 말고 클라이언트를 바꾸는 것만으로 비껴가는 경우가 있다.**
+ * 계정을 걸지 않아도 되는 길이라 먼저 시도해볼 값이 있는데, 그때마다 코드를 고치게
+ * 두지 않으려고 환경변수로 열어둔다.
+ *
+ * - `YTDLP_PLAYER_CLIENT` — 흔히 쓰는 경우를 위한 지름길. `tv,web_safari`처럼 적으면
+ *   `--extractor-args youtube:player_client=tv,web_safari`가 된다.
+ * - `YTDLP_EXTRA_ARGS` — 그 밖의 무엇이든. 문자열을 그대로 잘라 붙인다.
+ *
+ * 둘 다 있으면 순서대로 모두 붙는다. 잘못된 값을 넣으면 yt-dlp가 거부하므로,
+ * 무엇이 붙었는지 한 번은 로그에 남겨 원인을 찾을 수 있게 한다.
+ *
+ * @returns {string[]}
+ */
+function extraArgs() {
+  const args = [];
+
+  const playerClient = (process.env.YTDLP_PLAYER_CLIENT || '').trim();
+  if (playerClient) args.push('--extractor-args', `youtube:player_client=${playerClient}`);
+
+  const extra = (process.env.YTDLP_EXTRA_ARGS || '').trim();
+  if (extra) args.push(...splitArgs(extra));
+
+  if (args.length && !warnedExtraArgs) {
+    warnedExtraArgs = true;
+    console.log(`[yt-dlp] 추가 인자를 사용합니다: ${args.join(' ')}`);
+  }
+
+  return args;
+}
+
+/**
+ * 쿠키가 실제로 전달되고 있는지 한 줄로 알린다.
+ *
+ * 쿠키를 설정했는데 아무 변화가 없을 때, **무엇이 잘못됐는지 알 방법이 없었다.**
+ * 환경변수가 비었는지, 경로가 틀렸는지, 잘 먹고 있는지를 로그 한 줄로 가른다.
+ * 호스팅 패널에서는 셸을 쓰기 어려워 이 한 줄이 유일한 확인 수단이 된다.
+ *
+ * @returns {string}
+ */
+function cookieStatus() {
+  const configured = (process.env.YTDLP_COOKIES || '').trim();
+  if (!configured) return '쿠키: 설정 안 됨 (환경변수 YTDLP_COOKIES가 비어 있습니다)';
+  if (!fs.existsSync(configured)) return `쿠키: 파일 없음 — ${configured} (경로를 확인하세요)`;
+  return `쿠키: 적용됨 — ${configured}`;
 }
 
 function isYoutubeUrl(text) {
@@ -159,6 +312,8 @@ async function resolveTrack(query) {
     '-f',
     'bestaudio/best',
     ...cookieArgs(),
+    ...jsRuntimeArgs(),
+    ...extraArgs(),
   ]);
 
   let info;
@@ -212,6 +367,10 @@ function spawnAudioStream(webpageUrl, { opusOnly = false } = {}) {
       '--no-check-certificates',
       // 조회가 쿠키로 통과했어도 스트림 요청에 쿠키가 없으면 여기서 다시 막힌다.
       ...cookieArgs(),
+      // 조회를 통과시킨 클라이언트로 스트림도 열어야 한다. 한쪽에만 붙이면
+      // 검색은 되는데 재생만 막히는, 원인을 찾기 어려운 상태가 된다.
+      ...jsRuntimeArgs(),
+      ...extraArgs(),
     ],
     { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }
   );
@@ -223,5 +382,9 @@ module.exports = {
   spawnAudioStream,
   describeTrackError,
   cookieArgs,
+  cookieStatus,
+  extraArgs,
+  jsRuntimeArgs,
+  splitArgs,
   resolveYtdlpPath,
 };

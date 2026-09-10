@@ -168,6 +168,10 @@ yt-dlp (spawn) → stdout ─────────────────→
 
 **yt-dlp가 뽑은 스트림 URL을 ffmpeg가 직접 열게 바꾸지 마세요.** 그 URL은 yt-dlp가 쓴 클라이언트/헤더에 묶여 있어 ffmpeg의 요청은 403 Forbidden으로 거부됩니다. yt-dlp가 직접 받아 파이프로 넘기는 현재 구조가 이 문제를 피하는 방식입니다.
 
+**`jsRuntimeArgs()`가 `--js-runtimes node:<process.execPath>`를 붙입니다.** 유튜브는 재생 URL의 `n`을 JS로 풀어야 온전한 포맷을 주는데, 런타임이 없으면 yt-dlp가 우회 클라이언트로 떨어지고 **그 URL이 IP에 묶여 데이터센터에서 403으로 거부됩니다.** 기본 런타임은 deno뿐이라 대개 없지만, 우리는 Node 위에서 도니 설치할 것이 없습니다. **낡은 바이너리에 이 옵션을 넘기면 "unknown option"으로 재생이 통째로 죽으므로**, `--help`로 지원 여부를 한 번 확인하고 캐시합니다. 이 확인을 지우지 마세요.
+
+**yt-dlp 인자를 늘릴 때는 `resolveTrack`과 `spawnAudioStream` 양쪽에 넣으세요.** 조회에만 붙이면 **검색은 되는데 재생만 막히는** 상태가 됩니다. `cookieArgs()`와 `extraArgs()`가 두 곳에 나란히 들어가 있는 것이 그래서입니다. `extraArgs()`는 `YTDLP_PLAYER_CLIENT`(지름길)와 `YTDLP_EXTRA_ARGS`(무엇이든)를 읽는데, 유튜브 봇 판정을 **쿠키 없이** 비껴가려는 시도를 코드 수정 없이 해보기 위한 구멍입니다.
+
 yt-dlp 바이너리는 `yt-dlp-exec/src/constants`에서 경로만 가져오고 실행은 `node:child_process`로 직접 합니다([youtube.js](src/youtube.js)). 패키지의 execa 래퍼는 쓰지 않습니다.
 
 **`resolveTrack()`의 실패를 사용자에게 보여줄 때는 반드시 `describeTrackError(error)`를 거치세요.** 연령·지역·멤버십 제한, 라이브, 삭제, 타임아웃은 봇 고장이 아니라 정상적인 제약이며, 이 함수가 yt-dlp stderr와 play-dl 예외 문구를 사유별 문장으로 옮깁니다. **두 엔진의 오류 문구가 `youtube.js`의 `ERROR_HINTS` 한 표에 같이 들어 있습니다** — play-dl 쪽 문구를 추가할 때도 여기에 넣으세요. 원본 에러 메시지를 그대로 노출하거나 "영상을 찾지 못했습니다"로 뭉뚱그리지 마세요. 새 사유를 추가하려면 `ERROR_HINTS` 배열에 넣으며, **구체적인 패턴일수록 앞에** 둬야 합니다(위에서부터 첫 일치를 씁니다).
@@ -215,4 +219,6 @@ Opus 인코더 비트레이트는 음성 채널 입장 시점에 캐시한 `voic
 
 **`Unknown interaction` 또는 무응답** — 봇이 두 개 이상 떠 있을 가능성이 큽니다. pm2가 띄운 프로세스는 커맨드라인이 `ProcessContainerFork.js`로 나타나 `index.js` 검색에 잡히지 않으므로, `pm2 list`와 `node.exe` 프로세스 목록을 각각 확인해야 합니다.
 
-**모든 재생이 갑자기 실패** — 유튜브 변경으로 yt-dlp 바이너리가 낡았을 가능성이 높습니다. 바이너리는 `npm install` 시점에 받은 것이 그대로 유지됩니다.
+**모든 재생이 갑자기 실패** — 유튜브 변경으로 yt-dlp 바이너리가 낡았을 가능성이 높습니다. 바이너리는 `npm install` 시점에 받은 것이 그대로 유지되고, **`npm install`을 다시 돌려도 갱신되지 않습니다**(`ensure-ytdlp.js`가 "이미 있음"으로 건너뜁니다). `npm run update-ytdlp`이 `FORCE_YTDLP_DOWNLOAD=1`로 그 문을 엽니다.
+
+증상은 **조회는 되는데 다운로드만 `HTTP Error 403: Forbidden`으로 죽는** 모양입니다. `YTDLP_PLAYER_CLIENT`를 바꿔 고치려 들기 전에 **바이너리 버전부터 확인하세요** — 클라이언트를 아무리 바꿔도 낡은 바이너리로는 통과하지 못합니다. 반대로 **클라이언트를 검증할 때는 조회만 보면 안 됩니다.** `android_vr`은 제목은 가져오면서 오디오 요청에서 403이 나므로, 반드시 오디오를 받아보는 것까지 확인해야 합니다.

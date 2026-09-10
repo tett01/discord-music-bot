@@ -433,6 +433,14 @@ class GuildMusicPlayer {
 
       const detail = stderr.trim().split('\n').slice(-2).join(' ');
       console.error(`[music] guild ${this.guildId} yt-dlp 종료 code=${code} ${detail}`);
+      // 실행한 명령을 같이 남긴다. 같은 호스트에서 손으로 돌리면 되는데 봇에서만
+      // 실패하는 일이 있어서, 무엇이 달랐는지는 인자를 봐야 알 수 있다.
+      console.error(`[music] guild ${this.guildId} 실행한 명령: ${child.spawnargs.join(' ')}`);
+
+      // 403은 원인이 여럿이라(IP 차단, 곡별 제약, 출력 방식) 로그만으로는 갈리지 않는다.
+      // 호스팅 패널에서는 셸을 쓰기 어려운 경우가 많아, 봇이 직접 비교해 로그에 남긴다.
+      // 프로세스당 한 번만 돈다 — 곡마다 돌면 실패할 때마다 yt-dlp가 여섯 번씩 뜬다.
+      if (/403/.test(stderr)) runProbeOnce(track.url);
 
       if (passthrough && !receivedAudio() && this.source === handle) {
         console.warn(`[music] guild ${this.guildId} 원음 소스 없음, 일반 모드로 재시도: ${track.title}`);
@@ -541,6 +549,28 @@ function destroyAllPlayers() {
 
 // isBenignStreamError는 내부용이지만, 여기에 없는 코드가 들어오면 정지·건너뛰기의
 // 정상 부산물이 사용자에게 오류로 보이므로 테스트할 수 있게 내보낸다.
+/**
+ * 403을 만났을 때 조건별 비교표를 로그에 한 번만 남긴다.
+ *
+ * `YTDLP_NO_AUTO_PROBE=1`로 끌 수 있다. 여섯 번의 부분 다운로드가 도는 동안
+ * 재생에는 영향이 없지만, 512MB 인스턴스에서 신경이 쓰이면 꺼두면 된다.
+ *
+ * @param {string} url
+ */
+let probeStarted = false;
+function runProbeOnce(url) {
+  if (probeStarted) return;
+  if (String(process.env.YTDLP_NO_AUTO_PROBE || '').trim() === '1') return;
+  probeStarted = true;
+
+  console.error('[music] 403 원인을 좁히기 위해 조건별로 확인합니다. 잠시 걸립니다...');
+  // require를 여기서 한다. 진단용이라 평소에는 불러올 이유가 없다.
+  const { probe, formatProbe } = require('./ytdlpProbe');
+  probe(url)
+    .then((results) => console.error(formatProbe(results)))
+    .catch((error) => console.error('[music] 조건별 확인 실패:', error.message));
+}
+
 module.exports = {
   getPlayer,
   getExistingPlayer,

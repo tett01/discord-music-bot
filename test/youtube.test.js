@@ -5,7 +5,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { describeTrackError, isYoutubeUrl, cookieArgs, resolveYtdlpPath } = require('../src/youtube');
+const {
+  describeTrackError,
+  isYoutubeUrl,
+  cookieArgs,
+  extraArgs,
+  splitArgs,
+  resolveYtdlpPath,
+} = require('../src/youtube');
 
 const DEFAULT_MESSAGE = '영상을 찾지 못했습니다. 링크나 검색어를 확인해주세요.';
 
@@ -162,4 +169,107 @@ test('쿠키 파일이 있으면 --cookies를 붙이고, 없으면 조용히 뺀
   // 경로가 틀렸을 때 --cookies를 그대로 넘기면 yt-dlp가 알아보기 힘든 오류로 죽는다.
   process.env.YTDLP_COOKIES = path.join(dir, '없는파일.txt');
   assert.deepEqual(cookieArgs(), []);
+});
+
+// --- 추가 인자 (쿠키 없이 봇 판정을 비껴가려는 시도) ---
+
+function withEnv(vars, fn) {
+  const saved = {};
+  for (const [key, value] of Object.entries(vars)) {
+    saved[key] = process.env[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    return fn();
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+const NO_EXTRA = { YTDLP_PLAYER_CLIENT: undefined, YTDLP_EXTRA_ARGS: undefined };
+
+test('아무것도 지정하지 않으면 인자를 붙이지 않는다', () => {
+  // 기존 동작 그대로여야 한다. 빈 문자열이 인자로 새어 나가면 yt-dlp가 거부한다.
+  withEnv(NO_EXTRA, () => assert.deepEqual(extraArgs(), []));
+  withEnv({ ...NO_EXTRA, YTDLP_PLAYER_CLIENT: '   ', YTDLP_EXTRA_ARGS: '' }, () =>
+    assert.deepEqual(extraArgs(), [])
+  );
+});
+
+test('YTDLP_PLAYER_CLIENT는 extractor-args로 펼쳐진다', () => {
+  withEnv({ ...NO_EXTRA, YTDLP_PLAYER_CLIENT: 'tv,web_safari' }, () => {
+    assert.deepEqual(extraArgs(), ['--extractor-args', 'youtube:player_client=tv,web_safari']);
+  });
+});
+
+test('YTDLP_EXTRA_ARGS는 따옴표를 존중하며 쪼개진다', () => {
+  // 사람들이 문서에서 복사해 오는 모양 그대로 붙여넣을 수 있어야 한다.
+  withEnv({ ...NO_EXTRA, YTDLP_EXTRA_ARGS: '--extractor-args "youtube:player_client=tv"' }, () => {
+    assert.deepEqual(extraArgs(), ['--extractor-args', 'youtube:player_client=tv']);
+  });
+});
+
+test('두 변수를 함께 쓰면 순서대로 붙는다', () => {
+  withEnv({ YTDLP_PLAYER_CLIENT: 'ios', YTDLP_EXTRA_ARGS: '--sleep-requests 1' }, () => {
+    assert.deepEqual(extraArgs(), [
+      '--extractor-args',
+      'youtube:player_client=ios',
+      '--sleep-requests',
+      '1',
+    ]);
+  });
+});
+
+test('splitArgs는 공백과 따옴표를 다룬다', () => {
+  assert.deepEqual(splitArgs('a  b\tc'), ['a', 'b', 'c']);
+  assert.deepEqual(splitArgs('--opt "값 안에 공백"'), ['--opt', '값 안에 공백']);
+  assert.deepEqual(splitArgs("--opt '작은 따옴표'"), ['--opt', '작은 따옴표']);
+  assert.deepEqual(splitArgs('--opt="따옴표=값"'), ['--opt=따옴표=값']);
+  assert.deepEqual(splitArgs('   '), []);
+  // 닫히지 않은 따옴표를 던지지는 않는다. 여기서 죽는 것보다 yt-dlp가 거부하는 편이 낫다.
+  assert.deepEqual(splitArgs('--opt "안 닫힘'), ['--opt', '안 닫힘']);
+});
+
+// --- JavaScript 런타임 ---
+//
+// jsRuntimeArgs는 결과를 모듈 수준에 캐시하므로(바이너리 --help를 매번 부르지 않으려고)
+// 설정별 동작은 프로세스를 나눠서 본다.
+
+const { execFileSync } = require('node:child_process');
+
+const runWith = (env) =>
+  execFileSync(
+    process.execPath,
+    ['-e', `console.log(JSON.stringify(require(${JSON.stringify(path.join(__dirname, '..', 'src', 'youtube'))}).jsRuntimeArgs()))`],
+    { env: { ...process.env, ...env }, encoding: 'utf8' }
+  )
+    .trim()
+    .split('\n')
+    .pop();
+
+test('YTDLP_JS_RUNTIME=off면 인자를 붙이지 않는다', () => {
+  assert.deepEqual(JSON.parse(runWith({ YTDLP_JS_RUNTIME: 'off' })), []);
+});
+
+test('기본값은 지금 돌고 있는 Node를 물려준다', () => {
+  // 런타임이 없으면 yt-dlp가 n 파라미터를 풀지 못해 IP에 묶인 URL을 받고, 그것이
+  // 데이터센터에서 403으로 거부된다. 우리는 Node 위에서 도니 쓸 것이 이미 있다.
+  const args = JSON.parse(runWith({ YTDLP_JS_RUNTIME: '' }));
+
+  // 낡은 바이너리(--js-runtimes 모름)에서는 빈 배열이 정상이다. 그때는 검증할 것이 없다.
+  if (args.length === 0) return;
+
+  assert.equal(args[0], '--js-runtimes');
+  assert.match(args[1], /^node:/);
+  assert.ok(args[1].endsWith(process.execPath), `실행 중인 Node를 가리켜야 한다: ${args[1]}`);
+});
+
+test('YTDLP_JS_RUNTIME에 값을 주면 그대로 쓴다', () => {
+  const args = JSON.parse(runWith({ YTDLP_JS_RUNTIME: 'deno' }));
+  if (args.length === 0) return; // 지원하지 않는 바이너리
+  assert.deepEqual(args, ['--js-runtimes', 'deno']);
 });
