@@ -18,6 +18,8 @@ const {
   AUDIO_QUALITY_MODES,
 } = require('./db');
 const { TrackQueue, LOOP_MODES } = require('./trackQueue');
+const { getLyrics, lyricsDisabled } = require('./lyrics');
+const { LyricsSession } = require('./lyricsSession');
 
 /** @type {Map<string, GuildMusicPlayer>} */
 const players = new Map();
@@ -95,6 +97,12 @@ class GuildMusicPlayer {
     this.idleTimer = null;
     // 원음 재생에 실패해 일반 모드로 다시 틀어야 하는 곡. _handleTrackEnd가 집어간다.
     this.pendingFallback = null;
+    // 실시간 가사판. 곡마다 새로 만들고 곡이 끝나면 버린다. (lyricsSession.js 참고)
+    this.lyrics = null;
+    // 가사 자동 표시 여부. 프로세스 메모리에만 있어 재시작하면 꺼진 상태로 돌아간다.
+    this.lyricsEnabled = false;
+    // 가사판을 어디에 띄울지. 'voice'는 음성 채널 채팅, 'text'는 명령어를 친 채널.
+    this.lyricsTarget = 'voice';
 
     const settings = getGuildSettings(guildId);
     // 대기열·반복 모드는 TrackQueue가 관리한다. queue/current/loopMode는 아래 getter로
@@ -162,6 +170,10 @@ class GuildMusicPlayer {
         this.destroy();
         throw new Error('음성 채널 이동에 실패했습니다.');
       }
+
+      // 가사판은 옮겨온 채널이 아니라 **이전 채널에 남아 있다.** 여기서 정리하지 않으면
+      // 아무도 없는 채널에서 계속 편집되고, 새 채널에는 가사가 안 나온다.
+      this._stopLyrics();
 
       this._notify(
         `🔀 <#${currentChannelId}> 채널에 듣는 사람이 없어 <#${voiceChannel.id}> 채널로 이동했습니다.`
@@ -283,8 +295,31 @@ class GuildMusicPlayer {
     this.tracks.clear();
   }
 
+  /**
+   * 가사 자동 표시를 켜거나 끈다. 다음 곡부터가 아니라 **지금 곡에도 바로 적용된다.**
+   *
+   * DB에 쓰지 않는다 — 재시작하면 꺼진 상태로 돌아간다. (칼럼 추가는 ensureColumn과
+   * 양쪽 백엔드까지 따라오는 작업이라, 기능이 쓸 만한지 확인한 뒤에 붙인다)
+   *
+   * @param {boolean} enabled
+   * @param {'voice' | 'text'} [target]
+   */
+  setLyricsMode(enabled, target = this.lyricsTarget) {
+    this.lyricsEnabled = enabled;
+    this.lyricsTarget = target === 'text' ? 'text' : 'voice';
+    if (!enabled) this._stopLyrics();
+  }
+
+  /** 지금 재생 중인 곡의 가사판을 띄운다. 이미 떠 있으면 아무것도 하지 않는다. */
+  showLyricsNow() {
+    if (!this.lyricsEnabled || this.lyrics) return;
+    if (!this.current || !this.resource) return;
+    this._startLyrics(this.current, this.resource);
+  }
+
   destroy() {
     this._clearIdleTimer();
+    this._stopLyrics();
     this._killSource();
     this.pendingFallback = null;
     this.tracks.reset();
@@ -322,6 +357,7 @@ class GuildMusicPlayer {
    */
   async _play(track, passthrough = this.audioQuality === 'original') {
     this._clearIdleTimer();
+    this._stopLyrics();
     this._killSource();
     this.pendingFallback = null;
 
@@ -406,6 +442,82 @@ class GuildMusicPlayer {
     this.resource = resource;
 
     this.audioPlayer.play(resource);
+
+    if (this.lyricsEnabled) this._startLyrics(track, resource);
+  }
+
+  /**
+   * 가사판을 띄운다. **재생을 막지 않도록 기다리지 않는다.**
+   *
+   * 세션에 `this`를 넘기지 않는 것이 중요하다. 넘기는 것은 위치를 읽는 클로저 하나뿐이고,
+   * 그 클로저는 `resource`만 붙잡는다. 자세한 이유는 lyricsSession.js 머리말에 있다.
+   */
+  _startLyrics(track, resource) {
+    if (lyricsDisabled()) return;
+
+    getLyrics(track)
+      .then(async (lyrics) => {
+        // 조회가 몇 초 걸리는 사이에 곡이 바뀌었거나 정지했을 수 있다. 그때는 버린다.
+        if (this.resource !== resource || this.lyrics) return;
+        if (!lyrics) return;
+
+        const channel = this.lyricsChannel();
+        if (!channel) return;
+
+        // 동기 가사가 없으면 타이머를 아예 만들지 않고 전문을 한 번 보낸다. 추가 메모리 0이다.
+        if (!lyrics.synced) {
+          const body = lyrics.plain.length > 1900 ? `${lyrics.plain.slice(0, 1900)}\n…` : lyrics.plain;
+          channel.send(`🎤 **${track.title}** (동기 가사가 없어 전문만 표시합니다)\n${body}`).catch(() => {});
+          return;
+        }
+
+        const session = new LyricsSession({
+          lines: lyrics.synced,
+          title: track.title,
+          // ⚠️ player가 아니라 resource만 붙잡는다. playbackDuration은 일시정지 중에는
+          // 늘지 않아 /일시정지와 자동으로 맞는다.
+          getPositionMs: () => resource.playbackDuration,
+          channel,
+        });
+
+        this.lyrics = session;
+        const status = await session.start();
+        if (status !== 'started') {
+          this.lyrics = null;
+          if (status === 'limit') {
+            console.warn(`[가사] guild ${this.guildId} 동시 표시 상한에 걸려 건너뜁니다.`);
+          }
+        }
+      })
+      .catch((error) => {
+        // 가사는 부가 기능이다. 여기서 던지면 재생까지 흔들린다.
+        console.error(`[가사] guild ${this.guildId} 표시 실패:`, error.message);
+      });
+  }
+
+  _stopLyrics() {
+    const session = this.lyrics;
+    this.lyrics = null;
+    session?.stop();
+  }
+
+  /**
+   * 가사판을 띄울 채널을 고른다.
+   *
+   * 기본은 **봇이 들어가 있는 음성 채널의 텍스트 채팅**이다(v14의 음성 채널은 텍스트
+   * 채널이기도 하다). 듣는 사람과 보는 사람이 정확히 일치하고, 음악 채널이 가사로
+   * 도배되지 않는다. 쓸 권한이 없으면 조용히 명령어를 친 채널로 떨어진다.
+   *
+   * 음성 채널 ID를 따로 들고 있지 않는 것에 주의. joinConfig에 이미 있으므로 새로
+   * 붙잡는 참조가 없다.
+   */
+  lyricsChannel() {
+    if (this.lyricsTarget === 'voice') {
+      const voiceId = this.connection?.joinConfig.channelId;
+      const voice = voiceId ? this.textChannel?.guild?.channels.cache.get(voiceId) : null;
+      if (voice?.isSendable?.()) return voice;
+    }
+    return this.textChannel ?? null;
   }
 
   /**
