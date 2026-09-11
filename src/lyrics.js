@@ -169,16 +169,21 @@ const BLANK_LINE = '\u200b';
 const MAX_LINE_CHARS = 64;
 
 // 디스코드가 ```ansi 코드블록에서 해석하는 SGR 코드.
-// 0;30 어두운 회색 / 1;33 굵은 노랑 / 0;37 흰색 / 0 되돌리기
+// 0;30 어두운 회색 / 1;4;33 굵은 노랑 + 밑줄 / 0;37 흰색 / 0 되돌리기
+//
+// **현재 줄에 밑줄(4)을 함께 건다.** 노랑과 흰색의 차이만으로는 어느 줄이 지금인지
+// 한눈에 들어오지 않는다 — 클라이언트·테마에 따라 두 색이 비슷하게 보인다.
 const ANSI = {
   past: '\u001b[0;30m',
-  current: '\u001b[1;33m',
+  current: '\u001b[1;4;33m',
   next: '\u001b[0;37m',
   reset: '\u001b[0m',
 };
 
-// 색을 쓰지 않을 때 현재 줄을 가리키는 표시. 두 칸으로 맞춰 줄이 밀리지 않게 한다.
-const PLAIN_MARKERS = { current: '\u25b8 ', other: '  ' };
+// 현재 줄을 가리키는 표시. **색을 쓰는 모드에서도 붙인다** — ANSI가 렌더링되지 않는
+// 환경에서도 어느 줄이 지금인지는 알 수 있어야 한다. 색은 거들 뿐 유일한 신호가 아니다.
+// 나머지 줄을 두 칸으로 맞춰, 현재 줄이 내려갈 때 글자가 좌우로 밀리지 않게 한다.
+const MARKERS = { current: '\u25b8 ', other: '  ' };
 
 /**
  * 가사 한 줄을 코드블록에 넣어도 안전한 모양으로 만든다.
@@ -210,13 +215,16 @@ function plainStyle() {
  *
  * 디스코드에는 애니메이션이 없다. **같은 메시지를 다시 그리는 것으로 스크롤을 흉내낸다.**
  *
- * 대비는 크기가 아니라 **색**으로 준다. 헤딩(`## `)과 서브텍스트(`-# `)를 섞으면 한 블록
+ * 대비는 크기가 아니라 **색과 기호**로 준다. 헤딩(`## `)과 서브텍스트(`-# `)를 섞으면 한 블록
  * 안에 글씨 크기가 세 종류가 되어 줄 높이가 들쭉날쭉해진다. ```ansi 코드블록은 모든 줄이
  * 같은 크기라 화면이 흔들리지 않는다.
  *
  *   - 지난 줄  회색
- *   - 현재 줄  굵은 노랑   ← 여기가 "뚜렷하게"
+ *   - 현재 줄  `▸` + 굵은 노랑 + 밑줄   ← 여기가 "뚜렷하게"
  *   - 다음 줄  흰색
+ *
+ * **현재 줄의 신호를 색 하나에만 맡기지 마라.** 색 구분이 약한 클라이언트에서 가사판이
+ * 그냥 다섯 줄짜리 덩어리로 보인다. 기호(`▸`)는 렌더링 환경과 무관하게 살아남는다.
  *
  * 순수 함수다. 돌려주는 문자열은 500바이트 안쪽이고 즉시 GC된다.
  *
@@ -238,13 +246,16 @@ function renderWindow(lines, index, { color = !plainStyle() } = {}) {
     // 간주 구간을 빈 줄로 두면 화면이 비어 멈춘 것처럼 보인다.
     const text = sanitizeLyricLine(lines[i].text) || '\u266a';
 
+    const marker = i === index ? MARKERS.current : MARKERS.other;
+
     if (!color) {
-      body.push(`${i === index ? PLAIN_MARKERS.current : PLAIN_MARKERS.other}${text}`);
+      body.push(`${marker}${text}`);
       continue;
     }
 
     const style = i === index ? ANSI.current : i < index ? ANSI.past : ANSI.next;
-    body.push(`${style}${text}${ANSI.reset}`);
+    // 표시까지 스타일 안에 넣어야 현재 줄의 화살표가 같이 강조된다.
+    body.push(`${style}${marker}${text}${ANSI.reset}`);
   }
 
   return color ? ['```ansi', ...body, '```'].join('\n') : body.join('\n');
@@ -417,6 +428,7 @@ module.exports = {
   WINDOW_AFTER,
   BLANK_LINE,
   ANSI,
+  MARKERS,
   MAX_LINE_CHARS,
   sanitizeLyricLine,
   plainStyle,
