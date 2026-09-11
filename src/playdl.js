@@ -165,6 +165,40 @@ function pickThumbnail(details) {
 }
 
 /**
+ * `v=`가 있는 유튜브 링크에서 그 영상만 가리키는 URL을 뽑는다. 없으면 null이다.
+ *
+ * **유튜브 앱·유튜브 뮤직에서 복사한 링크에는 `&list=RD...`(자동 믹스)가 딸려 온다.**
+ * `play.yt_validate`는 그걸 보고 'playlist'로 판정하는데, 그대로 재생목록의 첫 곡을
+ * 집으면 **사용자가 고르지 않은 곡이 재생된다.** 대기열에 올라가는 제목도 그 곡이라
+ * 나중에는 왜 딴 곡이 나왔는지 알아내기 어렵다.
+ *
+ * yt-dlp 쪽은 `--no-playlist`가 같은 일을 한다. 두 엔진이 같은 링크에 다른 곡을
+ * 돌려주면 폴백이 일어날 때마다 곡이 바뀌므로, 규칙을 여기서 맞춰 둔다.
+ *
+ * 네트워크에 의존하지 않는 순수 함수다.
+ *
+ * @param {string} link
+ * @returns {string | null}
+ */
+function videoUrlFromLink(link) {
+  let parsed;
+  try {
+    parsed = new URL(String(link ?? '').trim());
+  } catch {
+    return null;
+  }
+
+  // youtu.be/<id>는 애초에 'video'로 판정되므로 여기 올 일이 없다. youtube.com만 본다.
+  if (!/(^|\.)youtube\.com$/i.test(parsed.hostname)) return null;
+
+  const id = parsed.searchParams.get('v');
+  // 영상 ID는 11자다. 이상한 값이 오면 건드리지 않고 원래 경로로 흘려보낸다.
+  if (!id || !/^[\w-]{11}$/.test(id)) return null;
+
+  return `https://www.youtube.com/watch?v=${id}`;
+}
+
+/**
  * 링크 또는 검색어를 재생 가능한 트랙 정보로 바꾼다.
  *
  * youtube.js의 `resolveTrack`과 **같은 모양의 객체**를 돌려준다. 두 엔진을 바꿔 껴도
@@ -178,10 +212,12 @@ async function resolveTrack(query) {
   if (!target) throw new Error('검색어가 비어 있습니다.');
 
   const kind = play.yt_validate(target);
+  // list=가 붙어 있어도 v=가 있으면 **그 영상이 사용자가 고른 곡이다.**
+  const single = kind === 'playlist' ? videoUrlFromLink(target) : null;
 
-  // 링크인 경우. 플레이리스트 링크는 첫 곡만 가져온다. (yt-dlp의 --no-playlist와 동일)
-  if (kind === 'video') {
-    const info = await play.video_basic_info(target);
+  // 링크인 경우. 순수 재생목록 링크(v=가 없는 것)만 첫 곡을 가져온다.
+  if (kind === 'video' || single) {
+    const info = await play.video_basic_info(single ?? target);
     const details = info?.video_details;
     if (!details?.url) throw new Error('Video unavailable: 영상 정보를 가져오지 못했습니다.');
     return {
@@ -241,6 +277,7 @@ async function openStream(url) {
 module.exports = {
   initPlayDl,
   resolveTrack,
+  videoUrlFromLink,
   openStream,
   normalizeCookie,
   readConfiguredCookie,

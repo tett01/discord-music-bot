@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { normalizeCookie, readConfiguredCookie, qualityLevel } = require('../src/playdl');
+const { normalizeCookie, readConfiguredCookie, qualityLevel, videoUrlFromLink } = require('../src/playdl');
 
 // 환경변수를 건드리는 테스트가 서로 새지 않게 한다.
 const COOKIE_KEYS = ['YOUTUBE_COOKIE', 'YOUTUBE_COOKIE_FILE', 'YTDLP_COOKIES'];
@@ -93,4 +93,31 @@ test('PLAYDL_QUALITY는 0~2만 받고 나머지는 기본값 2로 떨어진다',
     process.env.PLAYDL_QUALITY = value;
     assert.equal(qualityLevel(), 2, `잘못된 값 '${value}'가 기본값으로 떨어지지 않음`);
   }
+});
+
+test('믹스가 딸린 링크에서 사용자가 고른 영상만 뽑아낸다', () => {
+  // 유튜브 앱·유튜브 뮤직에서 복사하면 &list=RD...(자동 믹스)가 따라붙는다.
+  // play.yt_validate가 이걸 'playlist'로 보기 때문에, 걸러내지 않으면 믹스의 첫 곡이
+  // 재생된다 — 사용자는 고른 적 없는 곡을 듣게 된다.
+  assert.equal(
+    videoUrlFromLink('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1'),
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+  );
+  assert.equal(
+    videoUrlFromLink('https://music.youtube.com/watch?v=dQw4w9WgXcQ&list=RDAMVMdQw4w9WgXcQ'),
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+  );
+});
+
+test('v=가 없는 순수 재생목록 링크는 그대로 둔다', () => {
+  // 이쪽은 첫 곡을 가져오는 기존 동작이 맞다.
+  assert.equal(videoUrlFromLink('https://www.youtube.com/playlist?list=PLabcdefghij'), null);
+});
+
+test('유튜브가 아니거나 영상 ID가 아니면 손대지 않는다', () => {
+  // 엉뚱한 URL을 watch 링크로 바꿔 내보내면 전혀 다른 영상을 틀 수 있다.
+  assert.equal(videoUrlFromLink('https://evil.example.com/watch?v=dQw4w9WgXcQ'), null);
+  assert.equal(videoUrlFromLink('https://www.youtube.com/watch?v=short'), null);
+  assert.equal(videoUrlFromLink('그냥 검색어'), null);
+  assert.equal(videoUrlFromLink(null), null);
 });
