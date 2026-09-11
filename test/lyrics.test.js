@@ -10,6 +10,7 @@ const {
   parseCacheLimit,
   sanitizeLyricLine,
   ANSI,
+  MARKERS,
   MAX_LINE_CHARS,
 } = require('../src/lyrics');
 
@@ -104,7 +105,7 @@ test('재생 위치로 현재 줄을 찾는다', () => {
   assert.equal(lineIndexAt([], 1_000), -1);
 });
 
-test('현재 줄을 굵은 노랑으로, 지난 줄을 회색으로 칠한다', () => {
+test('현재 줄을 화살표와 굵은 노랑으로, 지난 줄을 회색으로 칠한다', () => {
   const rendered = renderWindow(SAMPLE, 2).split('\n');
 
   // 첫 줄과 끝 줄은 코드블록 울타리다.
@@ -113,9 +114,13 @@ test('현재 줄을 굵은 노랑으로, 지난 줄을 회색으로 칠한다', 
 
   const body = rendered.slice(1, -1);
   assert.equal(body.length, 5, '창의 높이는 항상 5줄이어야 한다');
-  assert.equal(body[0], `${ANSI.past}한 줄${ANSI.reset}`);
-  assert.equal(body[2], `${ANSI.current}세 줄${ANSI.reset}`, '현재 줄만 굵은 노랑이다');
-  assert.equal(body[3], `${ANSI.next}네 줄${ANSI.reset}`);
+  assert.equal(body[0], `${ANSI.past}${MARKERS.other}한 줄${ANSI.reset}`);
+  assert.equal(body[2], `${ANSI.current}${MARKERS.current}세 줄${ANSI.reset}`, '현재 줄만 굵은 노랑이다');
+  assert.equal(body[3], `${ANSI.next}${MARKERS.other}네 줄${ANSI.reset}`);
+
+  // 색이 유일한 신호이면 색 구분이 약한 클라이언트에서 다섯 줄이 한 덩어리로 보인다.
+  assert.ok(body[2].includes('▸'), '색을 못 보는 환경에서도 현재 줄을 알 수 있어야 한다');
+  assert.equal(body.filter((line) => line.includes('▸')).length, 1, '화살표는 현재 줄에만 붙는다');
 });
 
 test('모든 줄이 같은 크기라 창의 높이가 변하지 않는다', () => {
@@ -129,7 +134,7 @@ test('모든 줄이 같은 크기라 창의 높이가 변하지 않는다', () =
   const body = renderWindow(SAMPLE, 0).split('\n').slice(1, -1);
   assert.equal(body[0], '');
   assert.equal(body[1], '');
-  assert.equal(body[2], `${ANSI.current}한 줄${ANSI.reset}`);
+  assert.equal(body[2], `${ANSI.current}${MARKERS.current}한 줄${ANSI.reset}`);
 });
 
 test('전주 구간에는 강조된 줄이 없다', () => {
@@ -139,7 +144,7 @@ test('전주 구간에는 강조된 줄이 없다', () => {
 test('간주는 음표로 표시한다', () => {
   const lines = parseLrc('[00:10.00]\n[00:20.00]노래');
   const body = renderWindow(lines, 0).split('\n').slice(1, -1);
-  assert.equal(body[2], `${ANSI.current}♪${ANSI.reset}`, '빈 줄을 그대로 두면 멈춘 것처럼 보인다');
+  assert.equal(body[2], `${ANSI.current}${MARKERS.current}♪${ANSI.reset}`, '빈 줄을 그대로 두면 멈춘 것처럼 보인다');
 });
 
 test('가사에 백틱이 있어도 코드블록이 깨지지 않는다', () => {

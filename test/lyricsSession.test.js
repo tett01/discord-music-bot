@@ -5,7 +5,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { parseLrc, ANSI } = require('../src/lyrics');
+const { parseLrc, ANSI, MARKERS } = require('../src/lyrics');
 const { LyricsSession } = require('../src/lyricsSession');
 
 const LINES = parseLrc(
@@ -64,7 +64,7 @@ test('시작하면 가사판을 보내고 고정한다', async () => {
 
   const [embed] = channel.calls.sent[0].embeds;
   assert.ok(
-    embed.description.includes(`${ANSI.current}두 줄${ANSI.reset}`),
+    embed.description.includes(`${ANSI.current}${MARKERS.current}두 줄${ANSI.reset}`),
     '25초 지점의 현재 줄이 강조되어야 한다'
   );
   assert.equal(session.timer !== null, true, '다음 줄을 그릴 타이머가 예약되어야 한다');
@@ -137,7 +137,7 @@ test('줄이 바뀌지 않았으면 편집하지 않는다', async () => {
   await session._tick();
   assert.equal(channel.calls.edits.length, 1);
   assert.ok(
-    channel.calls.edits[0].payload.embeds[0].description.includes(`${ANSI.current}세 줄${ANSI.reset}`)
+    channel.calls.edits[0].payload.embeds[0].description.includes(`${ANSI.current}${MARKERS.current}세 줄${ANSI.reset}`)
   );
 
   session.stop();
@@ -155,7 +155,7 @@ test('여러 줄이 한꺼번에 지나가면 중간을 따라가지 않고 현�
 
   assert.equal(channel.calls.edits.length, 1, '건너뛴 줄마다 편집하지 않는다');
   assert.ok(
-    channel.calls.edits[0].payload.embeds[0].description.includes(`${ANSI.current}네 줄${ANSI.reset}`)
+    channel.calls.edits[0].payload.embeds[0].description.includes(`${ANSI.current}${MARKERS.current}네 줄${ANSI.reset}`)
   );
 
   session.stop();
