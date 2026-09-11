@@ -361,6 +361,17 @@ class GuildMusicPlayer {
     this._killSource();
     this.pendingFallback = null;
 
+    // **어느 곡이 실제로 재생됐는지 남기는 유일한 자리다.** 나머지 로그는 전부 실패했을
+    // 때만 찍히므로, 이게 없으면 "고르지 않은 곡이 나왔다"는 제보를 사후에 추적할 수
+    // 없다(#29). 조회한 엔진까지 남기는 것은 두 엔진이 같은 링크에 다른 곡을 돌려주는
+    // 종류의 버그가 실제로 있었기 때문이다.
+    //
+    // 곡당 한 줄이라 512MB 인스턴스에서도 부담이 없다. 실패 로그가 이미 이 수준이다.
+    console.log(
+      `[music] guild ${this.guildId} 재생 시작: ${track.title} (${track.url}) ` +
+        `engine=${track.engine ?? '?'} mode=${passthrough ? 'original' : 'normal'}`
+    );
+
     let handle;
     try {
       handle = await openSource(track, { opusOnly: passthrough });
