@@ -83,6 +83,23 @@ function ffmpegArgs(passthrough) {
     : [...input, '-f', 's16le', '-ar', '48000', '-ac', '2'];
 }
 
+/**
+ * openSource가 돌려준 핸들을 닫는다. (프로세스면 죽이고, 스트림이면 파괴한다)
+ *
+ * 재생에 쓰지 않고 버리는 핸들에도 필요하다 — 그냥 참조만 버리면 yt-dlp가 살아남는다.
+ *
+ * @param {{kind: string, child?: import('node:child_process').ChildProcess, stream?: import('node:stream').Readable} | null} handle
+ */
+function closeSourceHandle(handle) {
+  if (!handle) return;
+  try {
+    if (handle.kind === 'process') handle.child.kill();
+    else handle.stream.destroy();
+  } catch {
+    /* noop */
+  }
+}
+
 class GuildMusicPlayer {
   constructor(guildId, textChannel) {
     this.guildId = guildId;
@@ -97,6 +114,9 @@ class GuildMusicPlayer {
     this.idleTimer = null;
     // 원음 재생에 실패해 일반 모드로 다시 틀어야 하는 곡. _handleTrackEnd가 집어간다.
     this.pendingFallback = null;
+    // _play가 자기 차례인지 확인하는 표. _play는 openSource를 기다리는 동안 몇 초씩
+    // 멈춰 있는데, 그 사이에 건너뛰기·정지·다음 곡이 끼어들 수 있다. 자세한 건 _play 참고.
+    this._playToken = 0;
     // 실시간 가사판. 곡마다 새로 만들고 곡이 끝나면 버린다. (lyricsSession.js 참고)
     this.lyrics = null;
     // 가사 자동 표시 여부. 프로세스 메모리에만 있어 재시작하면 꺼진 상태로 돌아간다.
@@ -318,6 +338,9 @@ class GuildMusicPlayer {
   }
 
   destroy() {
+    // 스트림을 여는 중이던 _play가 있다면 그 결과를 버리게 한다. 그러지 않으면
+    // 나간 뒤에 소스가 열려 재생이 되살아나고 yt-dlp가 살아남는다.
+    this._playToken += 1;
     this._clearIdleTimer();
     this._stopLyrics();
     this._killSource();
@@ -356,6 +379,12 @@ class GuildMusicPlayer {
    * @param {boolean} [passthrough] 재인코딩 없이 그대로 흘려보낼지. 기본값은 서버 설정을 따른다.
    */
   async _play(track, passthrough = this.audioQuality === 'original') {
+    // openSource는 yt-dlp를 띄우므로 몇 초가 걸린다. 그 사이에 사용자가 /다음곡을 누르거나
+    // 원음 폴백이 걸리면 **또 다른 _play가 시작되어 우리를 앞질러 간다.** 표를 남겨 두고
+    // 기다린 뒤 확인하지 않으면, 늦게 깨어난 쪽이 audioPlayer.play를 다시 불러 **이미
+    // 지나간 곡이 잠깐 재생되고** 먼저 시작한 쪽의 yt-dlp/ffmpeg는 아무도 죽이지 않는다.
+    const token = (this._playToken += 1);
+
     this._clearIdleTimer();
     this._stopLyrics();
     this._killSource();
@@ -376,11 +405,20 @@ class GuildMusicPlayer {
     try {
       handle = await openSource(track, { opusOnly: passthrough });
     } catch (error) {
+      // 우리 차례가 아니면 조용히 물러난다. 여기서 _playNext를 부르면 지금 재생 중인
+      // 곡을 남이 건너뛰게 된다.
+      if (token !== this._playToken) return;
       // 조회는 됐는데 스트림을 못 연 경우다. 여기서 멈추면 대기열이 통째로 서므로,
       // 사유를 알린 뒤 다음 곡으로 넘어간다.
       console.error(`[music] guild ${this.guildId} 스트림 열기 실패 (${track.title}):`, error);
       this._notify(`⚠️ ${describeTrackError(error)}\n건너뜁니다: **${track.title}**`);
       await this._playNext();
+      return;
+    }
+
+    // 기다리는 사이에 다음 _play가 시작됐다면 방금 연 소스를 그대로 닫고 끝낸다.
+    if (token !== this._playToken) {
+      closeSourceHandle(handle);
       return;
     }
 
@@ -607,14 +645,7 @@ class GuildMusicPlayer {
 
     const handle = this.source;
     this.source = null;
-    if (!handle) return;
-
-    try {
-      if (handle.kind === 'process') handle.child.kill();
-      else handle.stream.destroy();
-    } catch {
-      /* noop */
-    }
+    closeSourceHandle(handle);
   }
 
   _startIdleTimer() {
