@@ -445,13 +445,43 @@ pm2 stop music-bot
 
 멈춘 뒤 `data/` 폴더를 통째로 복사하세요. (`bot.sqlite`와 함께 생기는 `-wal`, `-shm` 파일도 같이 옮기면 확실합니다.)
 
-봇을 멈출 수 없다면 SQLite에게 정합성 있는 사본을 만들게 합니다.
+### 자동 백업
+
+봇을 멈추지 않고 뜰 수 있습니다. `VACUUM INTO`로 SQLite에게 정합성 있는 사본을 만들게 하므로 WAL에 남은 최근 변경까지 담깁니다. (JSON 백엔드면 파일을 복사합니다.)
 
 ```bash
-node -e "const{DatabaseSync}=require('node:sqlite');new DatabaseSync('data/bot.sqlite').exec(\"VACUUM INTO 'data/backup.sqlite'\");console.log('data/backup.sqlite 생성 완료');"
+npm run backup
 ```
 
-복원할 때는 봇을 멈춘 뒤 백업 파일을 `data/bot.sqlite`로 되돌려 놓고 다시 시작하면 됩니다.
+`data/backups/bot-20260920-134500.sqlite` 형태로 쌓이고, **기본 14개를 넘기면 오래된 것부터 지웁니다.** 환경변수로 바꿀 수 있습니다.
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `BOT_BACKUP_DIR` | `data/backups` | 보관 위치 |
+| `BOT_BACKUP_KEEP` | `14` | 보관 개수. 초과분은 오래된 것부터 삭제 |
+
+지우는 대상은 이 스크립트가 만든 이름(`bot-` 접두사 + 같은 확장자)뿐이라, 같은 폴더에 손으로 둔 파일은 건드리지 않습니다.
+
+리눅스 서버라면 cron으로 매일 돌립니다.
+
+```bash
+(crontab -l 2>/dev/null; echo "30 4 * * * cd $HOME/music-bot && /usr/bin/node scripts/backup-db.js >> $HOME/backup.log 2>&1") | crontab -
+```
+
+⚠️ **백업이 같은 디스크에만 쌓이면 인스턴스가 통째로 사라질 때 같이 사라집니다.** 가끔 `scp`로 손에 들고 있는 기기로 내려받아 두세요.
+
+```bash
+scp -r <서버>:~/music-bot/data/backups ~/Desktop/
+```
+
+복원할 때는 봇을 멈춘 뒤 백업 파일을 `data/bot.sqlite`로 되돌려 놓고 다시 시작하면 됩니다. 이때 함께 있던 `-wal`, `-shm` 파일은 지워야 합니다 — 옛 저널이 남아 있으면 되돌린 사본과 엇갈립니다.
+
+```bash
+pm2 stop music-bot
+rm -f data/bot.sqlite-wal data/bot.sqlite-shm
+cp data/backups/bot-20260920-134500.sqlite data/bot.sqlite
+pm2 start music-bot
+```
 
 ## 문제 해결
 
